@@ -3,8 +3,7 @@ export interface Transaction {
   type: 'income' | 'expense';
   amount: number;
   category_id: number;
-  source: string;       // Added to match your DB schema
-  description?: string; // Optional field
+  description?: string;
   created_at: string;
 }
 

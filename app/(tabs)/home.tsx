@@ -1,86 +1,8 @@
-import React, { useEffect, useState } from 'react'
+import { useFocusEffect } from '@react-navigation/native'
+import React, { useCallback, useEffect, useState } from 'react'
 import { ScrollView, Text, View } from 'react-native'
 import { getCategories, getTotalBalance, getTransactions } from '../database/database'
-import type { Category, FinanceSummary, Record, Transaction } from '../types'
-
-// Fake data for demonstration
-const MOCK_BALANCE = 2847.50
-
-const MOCK_TRANSACTIONS = [
-  {
-    id: 1,
-    type: 'income',
-    amount: 3500.00,
-    category: 'Salary',
-    source: 'Monthly Paycheck',
-    description: 'December salary',
-    date: 'Dec 1, 2025'
-  },
-  {
-    id: 2,
-    type: 'expense',
-    amount: 125.50,
-    category: 'Food & Dining',
-    source: 'Grocery Store',
-    description: 'Weekly groceries',
-    date: 'Dec 15, 2025'
-  },
-  {
-    id: 3,
-    type: 'expense',
-    amount: 89.99,
-    category: 'Entertainment',
-    source: 'Netflix & Spotify',
-    description: 'Monthly subscriptions',
-    date: 'Dec 10, 2025'
-  },
-  {
-    id: 4,
-    type: 'income',
-    amount: 250.00,
-    category: 'Freelance',
-    source: 'Side Project',
-    description: 'Web design work',
-    date: 'Dec 20, 2025'
-  },
-  {
-    id: 5,
-    type: 'expense',
-    amount: 450.00,
-    category: 'Housing',
-    source: 'Rent Payment',
-    description: 'December rent',
-    date: 'Dec 1, 2025'
-  },
-  {
-    id: 6,
-    type: 'expense',
-    amount: 65.00,
-    category: 'Transportation',
-    source: 'Gas Station',
-    description: 'Fuel',
-    date: 'Dec 18, 2025'
-  },
-  {
-    id: 7,
-    type: 'income',
-    amount: 150.00,
-    category: 'Other',
-    source: 'Gift',
-    description: 'Birthday money',
-    date: 'Dec 25, 2025'
-  },
-  {
-    id: 8,
-    type: 'expense',
-    amount: 45.99,
-    category: 'Shopping',
-    source: 'Amazon',
-    description: 'Books and supplies',
-    date: 'Dec 22, 2025'
-  }
-]
-
+import type { Category, FinanceSummary, Transaction } from '../types'
 
 export default function Home() {
 
@@ -91,10 +13,19 @@ export default function Home() {
   const [expenses, setExpenses] = useState(0)
   const [categories, setCategories] = useState<Category[]>([])
 
+  const [categoryLookup, setCategoryLookup] = useState<Record<number, string>>({});
+
 
   useEffect(() => {
     fetchInfo()
   }, [])
+
+  // Refresh data when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchInfo()
+    }, [])
+  )
 
   const fetchInfo = async () => {
     try {
@@ -115,7 +46,7 @@ export default function Home() {
         return acc;
       }, { income: 0, expenses: 0, totalBalance: 0 });
       
-      const categoryLookup= categoriesArray.reduce<Record<number, string>>((acc, tx) => {
+      const categoriesLookup= categoriesArray.reduce<Record<number, string>>((acc, tx) => {
         acc[tx.id] = tx.name;
         return acc;
       }, {});
@@ -127,12 +58,35 @@ export default function Home() {
       setIncome(totals.income);
       setExpenses(totals.expenses);
       setCategories(categoriesArray);
+      setCategoryLookup(categoriesLookup);
 
     } catch (error) {
       console.error('Error fetching data:', error);
     }
 
   }
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString)
+    const now = new Date()
+    const diffTime = now.getTime() - date.getTime()
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
+
+    if (diffDays === 0) {
+      return 'Today'
+    } else if (diffDays === 1) {
+      return 'Yesterday'
+    } else if (diffDays < 7) {
+      return `${diffDays} days ago`
+    } else {
+      return date.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric',
+        year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
+      })
+    }
+  }
+
   return (
     <ScrollView className="flex-1 bg-gradient-to-b from-blue-50 to-slate-50">
       {/* Header Section */}
@@ -207,14 +161,11 @@ export default function Home() {
               
               {/* Transaction Info */}
               <View className="flex-1">
-                <Text className="text-base font-bold text-gray-900 mb-0.5">
-                  {transaction.source}
+                <Text className="font-medium text-blue-600 mb-1">
+                  {categoryLookup[transaction.category_id] || 'Uncategorized' }
                 </Text>
-                <Text className="text-xs font-medium text-blue-600 mb-1">
-                  {transaction.category}
-                </Text>
-                <Text className="text-xs text-gray-400">
-                  {transaction.created_at}
+                <Text className="text-sm text-gray-400">
+                  {formatDate(transaction.created_at)}
                 </Text>
               </View>
             </View>

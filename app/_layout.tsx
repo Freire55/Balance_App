@@ -1,9 +1,9 @@
 import { Tabs } from "expo-router";
+import { useEffect, useState } from "react";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
 import "../global.css";
 import NavBar from "./components/NavBar";
-import { useEffect, useState } from "react";
 import { connectDb, initDatabase } from "./database/database";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
 
 export default function RootLayout() {
     const [isDbReady, setIsDbReady] = useState(false);
@@ -45,10 +45,12 @@ export default function RootLayout() {
       }}
       tabBar={() => <NavBar />}
     >
+      <Tabs.Screen name="index" options={{ href: null }} />
       <Tabs.Screen name="(tabs)/home" />
       <Tabs.Screen name="(tabs)/stats" />
       <Tabs.Screen name="(tabs)/budget" />
       <Tabs.Screen name="(tabs)/settings" />
+      <Tabs.Screen name="(tabs)/newTransaction" options={{ href: null }} />
     </Tabs>
   );
 }

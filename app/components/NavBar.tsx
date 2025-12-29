@@ -72,10 +72,7 @@ const NavBar = () => {
             shadowRadius: 8,
             elevation: 8,
           }}
-          onPress={() => {
-            // Add transaction logic here
-            console.log('Add transaction pressed')
-          }}
+          onPress={() => router.push('/(tabs)/newTransaction')}
         >
           <Text className='text-white text-3xl font-bold'>+</Text>
         </TouchableOpacity>

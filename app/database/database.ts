@@ -1,5 +1,5 @@
 import * as SQLite from 'expo-sqlite';
-import { Transaction, Category, Budget } from '../types.js';
+import { Budget, Category, Transaction } from '../types.js';
 
 let db: SQLite.SQLiteDatabase | null = null;
 
@@ -28,11 +28,11 @@ export const executeSql = async <T>(sql: string, params: any[] = []): Promise<T>
 };
 
 export const initDatabase = async (): Promise<void> => {
+  // resetDatabase();
   await executeSql(`
     CREATE TABLE IF NOT EXISTS categories (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      kind TEXT NOT NULL
+      name TEXT NOT NULL
     );
   `);
 
@@ -42,7 +42,6 @@ export const initDatabase = async (): Promise<void> => {
       type TEXT NOT NULL,
       amount REAL NOT NULL,
       category_id INTEGER,
-      source TEXT NOT NULL,
       description TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY (category_id) REFERENCES categories(id)
@@ -71,12 +70,12 @@ export const initDatabase = async (): Promise<void> => {
 // --- CRUD FUNCTIONS ---
 
 export const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
-  const { type, amount, category_id, source, description, created_at } = transaction;
+  const { type, amount, category_id, description, created_at } = transaction;
   const sql = `
-    INSERT INTO transactions (type, amount, category_id, source, description, created_at) 
-    VALUES (?, ?, ?, ?, ?, ?);
+    INSERT INTO transactions (type, amount, category_id, description, created_at) 
+    VALUES (?, ?, ?, ?, ?);
   `;
-  const params = [type, amount, category_id, source, description, created_at];
+  const params = [type, amount, category_id, description, created_at];
   return await executeSql<{ success: boolean }>(sql, params);
 };
 
@@ -84,6 +83,11 @@ export const getTransactions = async (): Promise<Transaction[]> => {
   const sql = `SELECT * FROM transactions ORDER BY created_at DESC;`;
   return await executeSql<Transaction[]>(sql);
 };
+
+export const deleteTransaction = async (id:number) => {
+  const sql = `DELETE FROM transactions WHERE id = ?;`;
+  return await executeSql<{ success: boolean }>(sql, [id]);
+}
 
 export const addCategory = async (category: Omit<Category, 'id'>) => {
   const { name } = category;
@@ -96,14 +100,27 @@ export const getCategories = async (): Promise<Category[]> => {
   return await executeSql<Category[]>(sql);
 };
 
+export const deleteCategory = async (id:number) => {
+  const sql = `DELETE FROM categories WHERE id = ?;`;
+  return await executeSql<{ success: boolean }>(sql, [id]);
+}
+
+export const editCategory = async (id:number, name:string) => {
+  const sql = `UPDATE categories SET name = ? WHERE id = ?;`;
+  return await executeSql<{ success: boolean }>(sql, [name, id]);
+}
+
 export const getBudgets = async (): Promise<Budget[]> => {
   const sql = `SELECT * FROM budgets ORDER BY category_id ASC;`;
   return await executeSql<Budget[]>(sql);
 };
 
 export const getTotalBalance = async (): Promise<number> => {
-  const sql = `SELECT SUM(balance) AS total_balance FROM budgets;`;
-  // Result is an array of objects: [{ total_balance: 100 }]
+  const sql = `
+    SELECT 
+      SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END) as total_balance 
+    FROM transactions;
+  `;
   const result = await executeSql<{ total_balance: number }[]>(sql);
   return result[0]?.total_balance || 0;
 };
