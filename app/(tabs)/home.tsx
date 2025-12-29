@@ -1,5 +1,7 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import { ScrollView, Text, View } from 'react-native'
+import { getCategories, getTotalBalance, getTransactions } from '../database/database'
+import type { Category, FinanceSummary, Record, Transaction } from '../types'
 
 // Fake data for demonstration
 const MOCK_BALANCE = 2847.50
@@ -79,7 +81,58 @@ const MOCK_TRANSACTIONS = [
   }
 ]
 
+
 export default function Home() {
+
+
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [balance, setBalance] = useState(0)
+  const [income, setIncome] = useState(0)
+  const [expenses, setExpenses] = useState(0)
+  const [categories, setCategories] = useState<Category[]>([])
+
+
+  useEffect(() => {
+    fetchInfo()
+  }, [])
+
+  const fetchInfo = async () => {
+    try {
+      // Fetch transactions and Balance
+      const transactionsArray = await getTransactions();
+      const balanceValue = await getTotalBalance();
+      const categoriesArray = await getCategories();
+
+      
+      // Treat data for expenses and income display
+      
+      const totals = transactionsArray.reduce<FinanceSummary>((acc, tx) => {
+        if (tx.type === 'income') {
+          acc.income += tx.amount;
+        } else if (tx.type === 'expense') {
+          acc.expenses += tx.amount;
+        }
+        return acc;
+      }, { income: 0, expenses: 0, totalBalance: 0 });
+      
+      const categoryLookup= categoriesArray.reduce<Record<number, string>>((acc, tx) => {
+        acc[tx.id] = tx.name;
+        return acc;
+      }, {});
+
+    
+      // Assign to state
+      setTransactions(transactionsArray);
+      setBalance(balanceValue);
+      setIncome(totals.income);
+      setExpenses(totals.expenses);
+      setCategories(categoriesArray);
+
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    }
+
+  }
   return (
     <ScrollView className="flex-1 bg-gradient-to-b from-blue-50 to-slate-50">
       {/* Header Section */}
@@ -97,7 +150,7 @@ export default function Home() {
             Current Month
           </Text>
           <Text className="text-white text-5xl font-bold mb-1">
-            ${MOCK_BALANCE.toFixed(2)}
+            ${balance.toFixed(2)}
           </Text>
           <Text className="text-white/70 text-xs">
             December 2025
@@ -109,12 +162,12 @@ export default function Home() {
       <View className="flex-row px-6 -mt-6 mb-4 gap-3">
         <View className="flex-1 bg-white p-4 rounded-2xl shadow-md">
           <Text className="text-emerald-500 text-2xl font-bold mb-1">↑</Text>
-          <Text className="text-gray-900 text-lg font-bold">$3,900</Text>
+          <Text className="text-gray-900 text-lg font-bold">{income}€</Text>
           <Text className="text-gray-500 text-xs">Income</Text>
         </View>
         <View className="flex-1 bg-white p-4 rounded-2xl shadow-md">
           <Text className="text-rose-500 text-2xl font-bold mb-1">↓</Text>
-          <Text className="text-gray-900 text-lg font-bold">$1,052</Text>
+          <Text className="text-gray-900 text-lg font-bold">{expenses}€</Text>
           <Text className="text-gray-500 text-xs">Expenses</Text>
         </View>
       </View>
@@ -130,7 +183,7 @@ export default function Home() {
           </Text>
         </View>
         
-        {MOCK_TRANSACTIONS.map((transaction, index) => (
+        {transactions.map((transaction, index) => (
           <View 
             key={transaction.id} 
             className={`bg-white p-4 rounded-2xl mb-3 flex-row justify-between items-center shadow-sm border border-gray-100 ${
@@ -161,7 +214,7 @@ export default function Home() {
                   {transaction.category}
                 </Text>
                 <Text className="text-xs text-gray-400">
-                  {transaction.date}
+                  {transaction.created_at}
                 </Text>
               </View>
             </View>
