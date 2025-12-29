@@ -48,9 +48,8 @@ export default function RootLayout() {
       <Tabs.Screen name="index" options={{ href: null }} />
       <Tabs.Screen name="(tabs)/home" />
       <Tabs.Screen name="(tabs)/stats" />
-      <Tabs.Screen name="(tabs)/budget" />
-      <Tabs.Screen name="(tabs)/settings" />
       <Tabs.Screen name="(tabs)/newTransaction" options={{ href: null }} />
+      <Tabs.Screen name="(tabs)/history" />
     </Tabs>
   );
 }

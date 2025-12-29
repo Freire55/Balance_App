@@ -110,10 +110,15 @@ export const editCategory = async (id:number, name:string) => {
   return await executeSql<{ success: boolean }>(sql, [name, id]);
 }
 
-export const getBudgets = async (): Promise<Budget[]> => {
-  const sql = `SELECT * FROM budgets ORDER BY category_id ASC;`;
+export const getAllPositiveBalance = async (): Promise<Budget[]> => {
+  const sql = `SELECT * FROM budgets ORDER BY balance DESC;`;
   return await executeSql<Budget[]>(sql);
 };
+
+export const getAllNegativeBalance = async (): Promise<Budget[]> => {
+  const sql = `SELECT * FROM budgets ORDER BY balance ASC;`;
+  return await executeSql<Budget[]>(sql);
+}
 
 export const getTotalBalance = async (): Promise<number> => {
   const sql = `
@@ -124,6 +129,60 @@ export const getTotalBalance = async (): Promise<number> => {
   const result = await executeSql<{ total_balance: number }[]>(sql);
   return result[0]?.total_balance || 0;
 };
+
+export const getMonthlyTotal = async (month: string, year: string) => {
+  const start = `${year}-${month}-01`;
+  const end = `${year}-${month}-31`;
+
+  const sql = `
+    SELECT 
+      SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END) as monthly_total 
+    FROM transactions 
+    WHERE created_at BETWEEN ? AND ?;
+  `;
+  const result = await executeSql<{ monthly_total: number }[]>(sql, [start, end]);
+  return result[0]?.monthly_total || 0;
+}
+
+
+
+export const getYearlyTotal = async (year: string) => {
+  const start = `${year}-01-01`;
+  const end = `${year}-12-31`;
+
+  const sql = `
+    SELECT 
+      SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END) as yearly_total 
+    FROM transactions 
+    WHERE created_at BETWEEN ? AND ?;
+  `;
+  const result = await executeSql<{ yearly_total: number }[]>(sql, [start, end]);
+  return result[0]?.yearly_total || 0;
+}
+
+export const getMonthlyTransactions = async (month: string, year: string): Promise<Transaction[]> => {
+  const start = `${year}-${month}-01`;
+  const end = `${year}-${month}-31`;
+
+  const sql = `
+    SELECT * FROM transactions 
+    WHERE created_at BETWEEN ? AND ?
+    ORDER BY created_at DESC;
+  `;
+  return await executeSql<Transaction[]>(sql, [start, end]);
+}
+
+export const getYearlyTransactions = async (year: string): Promise<Transaction[]> => {
+  const start = `${year}-01-01`;
+  const end = `${year}-12-31`;
+
+  const sql = `
+    SELECT * FROM transactions 
+    WHERE created_at BETWEEN ? AND ?
+    ORDER BY created_at DESC;
+  `;
+  return await executeSql<Transaction[]>(sql, [start, end]);
+}
 
 // --- OPTIMIZATIONS ---
 

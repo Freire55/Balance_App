@@ -84,11 +84,12 @@ export default function NewTransaction() {
       setAmount('')
       setDescription('')
       setSelectedCategory(null)
+      router.back()
     } catch (error) {
       console.error('Error adding transaction:', error)
     }
   }
-  
+
   return (
     <KeyboardAvoidingView
         style={{ flex: 1 }}

@@ -1,8 +1,12 @@
 import { useFocusEffect } from '@react-navigation/native'
 import React, { useCallback, useEffect, useState } from 'react'
-import { ScrollView, Text, View } from 'react-native'
-import { getCategories, getTotalBalance, getTransactions } from '../database/database'
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native'
+import {getMonthlyTotal, getCategories, getTransactions, getMonthlyTransactions } from '../database/database'
 import type { Category, FinanceSummary, Transaction } from '../types'
+import { router } from 'expo-router'
+
+
+const now = new Date()
 
 export default function Home() {
 
@@ -30,14 +34,17 @@ export default function Home() {
   const fetchInfo = async () => {
     try {
       // Fetch transactions and Balance
-      const transactionsArray = await getTransactions();
-      const balanceValue = await getTotalBalance();
+      const transactionsArray = await getMonthlyTransactions((now.getMonth() + 1).toString().padStart(2, '0'), now.getFullYear().toString());
+      const balanceValue = await getMonthlyTotal((now.getMonth() + 1).toString().padStart(2, '0'), now.getFullYear().toString());
       const categoriesArray = await getCategories();
 
       
       // Treat data for expenses and income display
-      
       const totals = transactionsArray.reduce<FinanceSummary>((acc, tx) => {
+        const date = new Date(tx.created_at);
+        const month = date.getMonth();
+        const year = date.getFullYear();
+        if(month !== now.getMonth() || year !== now.getFullYear()) return acc;
         if (tx.type === 'income') {
           acc.income += tx.amount;
         } else if (tx.type === 'expense') {
@@ -68,7 +75,6 @@ export default function Home() {
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString)
-    const now = new Date()
     const diffTime = now.getTime() - date.getTime()
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
 
@@ -107,7 +113,7 @@ export default function Home() {
             ${balance.toFixed(2)}
           </Text>
           <Text className="text-white/70 text-xs">
-            December 2025
+            {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
           </Text>
         </View>
       </View>
@@ -132,9 +138,11 @@ export default function Home() {
           <Text className="text-xl font-bold text-gray-900">
             Recent Activity
           </Text>
+          <TouchableOpacity onPress={() => router.push('/(tabs)/history')}>
           <Text className="text-blue-600 text-sm font-semibold">
             See All
           </Text>
+          </TouchableOpacity>
         </View>
         
         {transactions.map((transaction, index) => (
@@ -170,7 +178,7 @@ export default function Home() {
               </View>
             </View>
 
-            {/* Right Side - Amount */}
+            {/* Right Side */}
             <View className="items-end">
               <Text className={`text-lg font-bold ${
                 transaction.type === 'income' ? 'text-emerald-600' : 'text-rose-600'

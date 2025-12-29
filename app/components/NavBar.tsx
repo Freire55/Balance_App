@@ -38,25 +38,15 @@ const NavBar = () => {
         {/* Center Spacer for the floating button */}
         <View className='w-16' />
 
-        {/* Budget Icon */}
-        <TouchableOpacity 
-          className='items-center justify-center px-6 py-2'
-          onPress={() => router.push('/(tabs)/budget')}
-        >
-          <Text className='text-2xl'>💰</Text>
-          <Text className={`text-xs mt-1 ${isActive('/(tabs)/budget') ? 'text-blue-500 font-semibold' : 'text-gray-600'}`}>
-            Budget
-          </Text>
-        </TouchableOpacity>
 
         {/* Settings Icon */}
         <TouchableOpacity 
           className='items-center justify-center px-6 py-2'
-          onPress={() => router.push('/(tabs)/settings')}
+          onPress={() => router.push('/(tabs)/history')}
         >
           <Text className='text-2xl'>⚙️</Text>
-          <Text className={`text-xs mt-1 ${isActive('/(tabs)/settings') ? 'text-blue-500 font-semibold' : 'text-gray-600'}`}>
-            Settings
+          <Text className={`text-xs mt-1 ${isActive('/(tabs)/history') ? 'text-blue-500 font-semibold' : 'text-gray-600'}`}>
+            History
           </Text>
         </TouchableOpacity>
       </View>

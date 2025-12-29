@@ -23,3 +23,9 @@ export interface FinanceSummary {
   expenses: number;
   totalBalance: number;
 }
+
+export interface Trends {
+    num: number,
+    income: number;
+    expenses: number;
+}
