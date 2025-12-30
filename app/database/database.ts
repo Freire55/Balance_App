@@ -1,190 +1,174 @@
-import * as SQLite from 'expo-sqlite';
-import { Budget, Category, Transaction } from '../types.js';
+import * as SQLite from "expo-sqlite";
+import { Budget, Category, Transaction } from "../types";
 
 let db: SQLite.SQLiteDatabase | null = null;
 
+// --- DATABASE CONNECTION ---
+
 export const connectDb = async (): Promise<SQLite.SQLiteDatabase> => {
   if (!db) {
-    db = await SQLite.openDatabaseAsync('finance.db');
+    db = await SQLite.openDatabaseAsync("finance.db");
   }
   return db;
 };
 
-/**
- * Generic SQL executor.
- * Usage: const data = await executeSql<Transaction[]>(query, params);
- */
-export const executeSql = async <T>(sql: string, params: any[] = []): Promise<T> => {
+
+export const executeSql = async <T>(
+  sql: string,
+  params: any[] = []
+): Promise<T> => {
   const database = await connectDb();
   const query = sql.trim().toUpperCase();
 
-  if (query.startsWith('SELECT')) {
+  if (query.startsWith("SELECT")) {
     const results = await database.getAllAsync<any>(sql, params);
     return results as T;
   } else {
     const result = await database.runAsync(sql, params);
-    return { success: true, lastInsertRowId: result.lastInsertRowId, changes: result.changes } as T;
+    return {
+      success: true,
+      lastInsertRowId: result.lastInsertRowId,
+      changes: result.changes,
+    } as T;
   }
 };
 
+// --- INITIALIZATION ---
+
 export const initDatabase = async (): Promise<void> => {
-  // resetDatabase();
   await executeSql(`
     CREATE TABLE IF NOT EXISTS categories (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id INTEGER PRIMARY KEY AUTOINCREMENT, 
       name TEXT NOT NULL
     );
   `);
 
   await executeSql(`
     CREATE TABLE IF NOT EXISTS transactions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      type TEXT NOT NULL,
-      amount REAL NOT NULL,
-      category_id INTEGER,
-      description TEXT,
-      created_at TEXT NOT NULL,
+      id INTEGER PRIMARY KEY AUTOINCREMENT, 
+      type TEXT NOT NULL, 
+      amount REAL NOT NULL, 
+      category_id INTEGER, 
+      description TEXT, 
+      created_at TEXT NOT NULL, 
       FOREIGN KEY (category_id) REFERENCES categories(id)
     );
   `);
 
   await executeSql(`
     CREATE TABLE IF NOT EXISTS budgets (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      category_id INTEGER NOT NULL UNIQUE,
-      balance REAL DEFAULT 0,
+      id INTEGER PRIMARY KEY AUTOINCREMENT, 
+      category_id INTEGER NOT NULL UNIQUE, 
+      balance REAL DEFAULT 0, 
       FOREIGN KEY (category_id) REFERENCES categories(id)
     );
   `);
 
-  console.log('Database initialized');
+  await createTriggers();
+  await createIndexes();
 };
 
-// export const resetDatabase = async (): Promise<void> => {
-//   await executeSql('DROP TABLE IF EXISTS transactions;');
-//   await executeSql('DROP TABLE IF EXISTS budgets;');
-//   await executeSql('DROP TABLE IF EXISTS categories;');
-//   console.log('🗑️ All tables dropped.');
-// };
+// TRANSACTIONS
 
-// --- CRUD FUNCTIONS ---
-
-export const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
+export const addTransaction = (transaction: Omit<Transaction, "id">) => {
   const { type, amount, category_id, description, created_at } = transaction;
-  const sql = `
-    INSERT INTO transactions (type, amount, category_id, description, created_at) 
-    VALUES (?, ?, ?, ?, ?);
-  `;
-  const params = [type, amount, category_id, description, created_at];
-  return await executeSql<{ success: boolean }>(sql, params);
+  return executeSql(
+    `INSERT INTO transactions (type, amount, category_id, description, created_at) 
+     VALUES (?, ?, ?, ?, ?);`,
+    [type, amount, category_id, description, created_at]
+  );
 };
 
-export const getTransactions = async (): Promise<Transaction[]> => {
-  const sql = `SELECT * FROM transactions ORDER BY created_at DESC;`;
-  return await executeSql<Transaction[]>(sql);
-};
+export const getTransactions = () =>
+  executeSql<Transaction[]>(
+    `SELECT * FROM transactions ORDER BY created_at DESC;`
+  );
 
-export const deleteTransaction = async (id:number) => {
-  const sql = `DELETE FROM transactions WHERE id = ?;`;
-  return await executeSql<{ success: boolean }>(sql, [id]);
-}
+export const deleteTransaction = (id: number) =>
+  executeSql(`DELETE FROM transactions WHERE id = ?;`, [id]);
 
-export const addCategory = async (category: Omit<Category, 'id'>) => {
-  const { name } = category;
-  const sql = `INSERT INTO categories (name) VALUES (?);`;
-  return await executeSql<{ success: boolean }>(sql, [name]);
-};
+// CATEGORIES 
 
-export const getCategories = async (): Promise<Category[]> => {
-  const sql = `SELECT * FROM categories ORDER BY name ASC;`;
-  return await executeSql<Category[]>(sql);
-};
+export const getCategories = () =>
+  executeSql<Category[]>(`SELECT * FROM categories ORDER BY name ASC;`);
+
+export const addCategory = (name: string) =>
+  executeSql(`INSERT INTO categories (name) VALUES (?);`, [name]);
+
+export const editCategory = (id: number, name: string) =>
+  executeSql(`UPDATE categories SET name = ? WHERE id = ?;`, [name, id]);
 
 export const deleteCategory = async (id:number) => {
   const sql = `DELETE FROM categories WHERE id = ?;`;
   return await executeSql<{ success: boolean }>(sql, [id]);
 }
 
-export const editCategory = async (id:number, name:string) => {
-  const sql = `UPDATE categories SET name = ? WHERE id = ?;`;
-  return await executeSql<{ success: boolean }>(sql, [name, id]);
-}
+// PERIOD FILTERING & STATS
 
-export const getAllPositiveBalance = async (): Promise<Budget[]> => {
-  const sql = `SELECT * FROM budgets ORDER BY balance DESC;`;
-  return await executeSql<Budget[]>(sql);
+export const getMonthlyTransactions = (month: string, year: string) => {
+  const filter = `${year}-${month}%`;
+  return executeSql<Transaction[]>(
+    `SELECT * FROM transactions 
+     WHERE created_at LIKE ? 
+     ORDER BY created_at DESC;`,
+    [filter]
+  );
 };
 
-export const getAllNegativeBalance = async (): Promise<Budget[]> => {
-  const sql = `SELECT * FROM budgets ORDER BY balance ASC;`;
-  return await executeSql<Budget[]>(sql);
-}
-
-export const getTotalBalance = async (): Promise<number> => {
+export const getMonthlyTotal = async (month: string, year: string): Promise<number> => {
+  const filter = `${year}-${month}%`;
   const sql = `
-    SELECT 
-      SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END) as total_balance 
-    FROM transactions;
+    SELECT SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END) as total 
+    FROM transactions 
+    WHERE created_at LIKE ?;
   `;
-  const result = await executeSql<{ total_balance: number }[]>(sql);
-  return result[0]?.total_balance || 0;
+  const result = await executeSql<{ total: number }[]>(sql, [filter]);
+  return result[0]?.total || 0;
 };
 
-export const getMonthlyTotal = async (month: string, year: string) => {
-  const start = `${year}-${month}-01`;
-  const end = `${year}-${month}-31`;
-
+export const getYearlyTotal = async (year: string): Promise<number> => {
+  const filter = `${year}%`;
   const sql = `
-    SELECT 
-      SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END) as monthly_total 
+    SELECT SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END) as total 
     FROM transactions 
-    WHERE created_at BETWEEN ? AND ?;
+    WHERE created_at LIKE ?;
   `;
-  const result = await executeSql<{ monthly_total: number }[]>(sql, [start, end]);
-  return result[0]?.monthly_total || 0;
-}
+  const result = await executeSql<{ total: number }[]>(sql, [filter]);
+  return result[0]?.total || 0;
+};
 
+export const getTransactionCount = async (year: string, month?: string): Promise<number> => {
+  const filter = month ? `${year}-${month}%` : `${year}%`;
+  const sql = `SELECT COUNT(*) as count FROM transactions WHERE created_at LIKE ?;`;
+  const result = await executeSql<{ count: number }[]>(sql, [filter]);
+  return result[0]?.count || 0;
+};
 
-
-export const getYearlyTotal = async (year: string) => {
-  const start = `${year}-01-01`;
-  const end = `${year}-12-31`;
-
+export const getCategoryBreakdown = async (year: string, month?: string) => {
+  const filter = month ? `${year}-${month}%` : `${year}%`;
   const sql = `
-    SELECT 
-      SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END) as yearly_total 
+    SELECT t.category_id as id, c.name, SUM(t.amount) as balance, t.type
+    FROM transactions t
+    JOIN categories c ON t.category_id = c.id
+    WHERE t.created_at LIKE ?
+    GROUP BY t.category_id, t.type
+    ORDER BY ABS(SUM(t.amount)) DESC;
+  `;
+  return await executeSql<any[]>(sql, [filter]);
+};
+
+export const getPeriodTotal = async (year: string, month?: string): Promise<number> => {
+  const filter = month ? `${year}-${month}%` : `${year}%`;
+  const sql = `
+    SELECT SUM(CASE WHEN type = 'income' THEN amount ELSE -amount END) as total 
     FROM transactions 
-    WHERE created_at BETWEEN ? AND ?;
+    WHERE created_at LIKE ?;
   `;
-  const result = await executeSql<{ yearly_total: number }[]>(sql, [start, end]);
-  return result[0]?.yearly_total || 0;
-}
+  const result = await executeSql<{ total: number }[]>(sql, [filter]);
+  return result[0]?.total || 0;
+};
 
-export const getMonthlyTransactions = async (month: string, year: string): Promise<Transaction[]> => {
-  const start = `${year}-${month}-01`;
-  const end = `${year}-${month}-31`;
-
-  const sql = `
-    SELECT * FROM transactions 
-    WHERE created_at BETWEEN ? AND ?
-    ORDER BY created_at DESC;
-  `;
-  return await executeSql<Transaction[]>(sql, [start, end]);
-}
-
-export const getYearlyTransactions = async (year: string): Promise<Transaction[]> => {
-  const start = `${year}-01-01`;
-  const end = `${year}-12-31`;
-
-  const sql = `
-    SELECT * FROM transactions 
-    WHERE created_at BETWEEN ? AND ?
-    ORDER BY created_at DESC;
-  `;
-  return await executeSql<Transaction[]>(sql, [start, end]);
-}
-
-// --- OPTIMIZATIONS ---
+// TRIGGERS & INDEXES
 
 export const createIndexes = async (): Promise<void> => {
   await executeSql(`CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at);`);
@@ -194,7 +178,6 @@ export const createIndexes = async (): Promise<void> => {
 };
 
 export const createTriggers = async (): Promise<void> => {
-  // Trigger 1: Auto-create budget row if category is first-time used
   await executeSql(`
     CREATE TRIGGER IF NOT EXISTS trg_init_budget
     AFTER INSERT ON transactions
@@ -204,7 +187,6 @@ export const createTriggers = async (): Promise<void> => {
     END;
   `);
 
-  // Trigger 2: Maintain current balance in budget table
   await executeSql(`
     CREATE TRIGGER IF NOT EXISTS trg_update_budget_balance
     AFTER INSERT ON transactions

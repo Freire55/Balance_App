@@ -14,7 +14,7 @@ export interface Category {
 
 export interface Budget {
   id: number;
-  category_id: number;
+  category_id: number; 
   balance: number;
 }
 
@@ -28,4 +28,11 @@ export interface Trends {
     num: number,
     income: number;
     expenses: number;
+}
+
+export interface CategoryStat {
+  id: number;
+  name: string;
+  balance: number;
+  type: 'income' | 'expense';
 }
