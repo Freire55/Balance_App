@@ -1,13 +1,13 @@
+import { useFocusEffect } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import { useFocusEffect } from 'expo-router';
-import { CategoryStat, Transaction, Trends } from '../types';
-import { 
-  getTransactions, 
-  getCategoryBreakdown, 
-  getPeriodTotal, 
-  getTransactionCount 
+import {
+  getCategoryBreakdown,
+  getPeriodTotal,
+  getTransactionCount,
+  getTransactions
 } from '../database/database';
+import { Trends } from '../types';
 
 const now = new Date();
 
@@ -17,8 +17,7 @@ export default function Stats() {
   const [expenses, setExpenses] = useState(0);
   const [balance, setBalance] = useState(0);
   const [transactionCount, setTransactionCount] = useState(0);
-  const [posBreakdown, setPosBreakdown] = useState<any[]>([]);
-  const [negBreakdown, setNegBreakdown] = useState<any[]>([]);
+  const [categoryBreakdown, setCategoryBreakdown] = useState<any[]>([]);
   const [weeklyTrend, setWeeklyTrend] = useState<Trends[]>([]);
   const [monthlyTrend, setMonthlyTrend] = useState<Trends[]>([]);
 
@@ -35,8 +34,7 @@ export default function Stats() {
 
       setBalance(netBalance);
       setTransactionCount(count);
-      setPosBreakdown(breakdown.filter(item => item.type === 'income'));
-      setNegBreakdown(breakdown.filter(item => item.type === 'expense'));
+      setCategoryBreakdown(breakdown);
 
       // 2. Fetch Raw Transactions for Trend Calculation
       const txs = await getTransactions();
@@ -119,22 +117,46 @@ export default function Stats() {
       <View className="px-6 mb-6">
         <View className="bg-white rounded-2xl p-5 shadow-md">
           <Text className="text-lg font-bold mb-4">Top Categories</Text>
-          {[...posBreakdown, ...negBreakdown].map((cat, i) => (
-            <View key={i} className="mb-4">
-              <View className="flex-row justify-between mb-2">
-                <Text className="text-sm text-gray-700">{cat.name}</Text>
-                <Text className={`text-sm font-bold ${cat.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                  {Math.abs(cat.balance).toFixed(2)}€
-                </Text>
-              </View>
-              <View className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                <View 
-                  className={`h-full ${cat.type === 'income' ? 'bg-emerald-500' : 'bg-rose-500'}`} 
-                  style={{ width: `${(Math.abs(cat.balance) / (cat.type === 'income' ? income : expenses)) * 100 || 0}%` }}
-                />
-              </View>
-            </View>
-          ))}
+          {(() => {
+            // Sort: positive balances first (descending), then negative balances (by absolute value descending)
+            const sortedCategories = [...categoryBreakdown].sort((a, b) => {
+              if (a.balance >= 0 && b.balance < 0) return -1;
+              if (a.balance < 0 && b.balance >= 0) return 1;
+              return Math.abs(b.balance) - Math.abs(a.balance);
+            });
+            
+            // Find max in each group
+            const maxPositive = Math.max(...sortedCategories.filter(c => c.balance >= 0).map(c => c.balance), 0);
+            const maxNegative = Math.max(...sortedCategories.filter(c => c.balance < 0).map(c => Math.abs(c.balance)), 0);
+            
+            return sortedCategories.map((cat, i) => {
+              // Width relative to max in respective group
+              const percentage = cat.balance >= 0 
+                ? (maxPositive > 0 ? (cat.balance / maxPositive) * 100 : 0)
+                : (maxNegative > 0 ? (Math.abs(cat.balance) / maxNegative) * 100 : 0);
+              
+              return (
+                <View key={i} className="mb-4">
+                  <View className="flex-row justify-between mb-2">
+                    <Text className="text-sm text-gray-700">{cat.name}</Text>
+                    <Text className={`text-sm font-bold ${
+                      cat.balance >= 0 ? 'text-emerald-600' : 'text-rose-600'
+                    }`}>
+                      {cat.balance >= 0 ? '+' : ''}{cat.balance.toFixed(2)}€
+                    </Text>
+                  </View>
+                  <View className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <View 
+                      className={`h-full ${
+                        cat.balance >= 0 ? 'bg-emerald-500' : 'bg-rose-500'
+                      }`} 
+                      style={{ width: `${percentage}%` }}
+                    />
+                  </View>
+                </View>
+              );
+            });
+          })()}
         </View>
       </View>
 

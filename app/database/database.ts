@@ -216,12 +216,13 @@ export const getTransactionCount = async (year: string, month?: string): Promise
 export const getCategoryBreakdown = async (year: string, month?: string) => {
   const filter = month ? `${year}-${month}%` : `${year}%`;
   const sql = `
-    SELECT t.category_id as id, c.name, SUM(t.amount) as balance, t.type
+    SELECT t.category_id as id, c.name, 
+           SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE -t.amount END) as balance
     FROM transactions t
     JOIN categories c ON t.category_id = c.id
     WHERE t.created_at LIKE ?
-    GROUP BY t.category_id, t.type
-    ORDER BY ABS(SUM(t.amount)) DESC;
+    GROUP BY t.category_id
+    ORDER BY ABS(SUM(CASE WHEN t.type = 'income' THEN t.amount ELSE -t.amount END)) DESC;
   `;
   return await executeSql<any[]>(sql, [filter]);
 };
