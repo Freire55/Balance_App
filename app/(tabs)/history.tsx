@@ -1,13 +1,13 @@
+import { useFocusEffect } from "expo-router";
 import React, { useCallback, useState } from "react";
 import { Alert, ScrollView, Text, TouchableOpacity, View } from "react-native";
-import { Category, Transaction } from "../types";
 import {
-  deleteTransaction,
-  getCategories,
-  getYearlyTotal,
-  getTransactions,
+    deleteTransaction,
+    getCategories,
+    getTransactions,
+    getYearlyTotal,
 } from "../database/database";
-import { useFocusEffect } from "expo-router";
+import { Transaction } from "../types";
 
 const now = new Date();
 
@@ -84,7 +84,7 @@ export default function History() {
   const handleLongPress = (transaction: Transaction) => {
     Alert.alert(
       "Delete Transaction",
-      `Delete "${categoriesLookup[transaction.category_id] || "Transaction"}" for $${transaction.amount.toFixed(2)}?`,
+      `Delete "${categoriesLookup[transaction.category_id] || "Transaction"}" for ${transaction.amount.toFixed(2)}€?`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -107,18 +107,18 @@ export default function History() {
         <View className="bg-white/20 p-5 rounded-2xl border border-white/30 mb-3">
           <Text className="text-white/80 text-sm mb-1">Yearly Balance ({now.getFullYear()})</Text>
           <Text className="text-white text-4xl font-bold">
-            {totalBalance >= 0 ? "+" : ""}${totalBalance.toFixed(2)}
+            {totalBalance >= 0 ? "+" : ""}{totalBalance.toFixed(2)}€
           </Text>
         </View>
 
         <View className="flex-row gap-3">
           <View className="flex-1 bg-white/20 p-4 rounded-2xl border border-white/30">
             <Text className="text-white/80 text-xs">Income</Text>
-            <Text className="text-white text-xl font-bold">${totalIncome.toFixed(0)}</Text>
+            <Text className="text-white text-xl font-bold">{totalIncome.toFixed(0)}€</Text>
           </View>
           <View className="flex-1 bg-white/20 p-4 rounded-2xl border border-white/30">
             <Text className="text-white/80 text-xs">Expenses</Text>
-            <Text className="text-white text-xl font-bold">${totalExpenses.toFixed(0)}</Text>
+            <Text className="text-white text-xl font-bold">{totalExpenses.toFixed(0)}€</Text>
           </View>
         </View>
       </View>
@@ -161,7 +161,7 @@ export default function History() {
               <Text className="text-xs text-gray-400">{formatDate(tx.created_at)}</Text>
             </View>
             <Text className={`text-lg font-bold ${tx.type === "income" ? "text-emerald-600" : "text-rose-600"}`}>
-              {tx.type === "income" ? "+" : "-"}${tx.amount.toFixed(2)}
+              {tx.type === "income" ? "+" : "-"}{tx.amount.toFixed(2)}€
             </Text>
           </TouchableOpacity>
         ))}

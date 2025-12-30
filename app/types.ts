@@ -36,3 +36,13 @@ export interface CategoryStat {
   balance: number;
   type: 'income' | 'expense';
 }
+
+export interface RecurringTransaction {
+  id: number;
+  type: 'income' | 'expense';
+  amount: number;
+  category_id: number;
+  description?: string;
+  start_date: string;
+  end_date?: string;
+}

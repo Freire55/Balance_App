@@ -1,42 +1,72 @@
-import { Tabs } from "expo-router";
+import * as Notifications from 'expo-notifications';
+import { Tabs, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 import "../global.css";
 import NavBar from "./components/NavBar";
-import { connectDb, initDatabase } from "./database/database";
+import { connectDb, initDatabase, resetDatabase, seedDatabase } from "./database/database";
+import {
+  registerForPushNotificationsAsync,
+  scheduleAllNotifications
+} from './notifications/notificationService';
+import { processRecurringTransactions } from './utils/recurringProcessor';
+
+// Configure notification behavior
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 export default function RootLayout() {
-    const [isDbReady, setIsDbReady] = useState(false);
+  const [isDbReady, setIsDbReady] = useState(false);
+  const router = useRouter();
 
-    useEffect(() => {
-      async function initializeDatabase() {
-        try {
-          // 1. AWAIT the database connection
-          await connectDb(); 
-          
-          // 2. AWAIT the table creation
-          await initDatabase(); 
-          
-          // 3. Mark the database as ready
-          setIsDbReady(true);
-          console.log("Database initialized successfully.");
-        } catch (error) {
-          console.error("Failed to initialize database:", error);
-          // Handle error state (e.g., show an error screen)
-        }
+  useEffect(() => {
+    async function initializeApp() {
+      try {
+        // --- Database Setup ---
+        await connectDb();
+        // await resetDatabase();
+        await initDatabase();
+        setIsDbReady(true);
+
+        // --- Notifications Setup ---
+        await registerForPushNotificationsAsync();
+        await scheduleAllNotifications();
+
+        // --- Process Recurring Transactions ---
+        await processRecurringTransactions();
+        
+        console.log('App initialized with notifications');
+      } catch (error) {
+        console.error("Failed to initialize app:", error);
       }
-
-      initializeDatabase();
-    }, []);
-
-    // Show a loading screen while the database is being initialized
-    if (!isDbReady) {
-      return (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#19E1FF" />
-        </View>
-      );
     }
+
+    initializeApp();
+  }, []);
+
+  // Handle notification taps to redirect user to Stats
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener(response => {
+      const screen = response.notification.request.content.data.screen as string;
+      if (screen) router.push(screen as any);
+    });
+    return () => subscription.remove();
+  }, []);
+
+  if (!isDbReady) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#19E1FF" />
+      </View>
+    );
+  }
+
   return (
     <Tabs
       screenOptions={{

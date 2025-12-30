@@ -1,9 +1,8 @@
-import { useFocusEffect } from 'expo-router'
-import React, { useCallback, useEffect, useState } from 'react'
+import { router, useFocusEffect } from 'expo-router'
+import React, { useCallback, useState } from 'react'
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native'
-import { getMonthlyTotal, getCategories, getMonthlyTransactions } from '../database/database'
-import type { Category, FinanceSummary, Transaction } from '../types'
-import { router } from 'expo-router'
+import { getCategories, getMonthlyTotal, getMonthlyTransactions } from '../database/database'
+import type { Transaction } from '../types'
 
 const now = new Date()
 
@@ -62,7 +61,7 @@ export default function Home() {
         
         <View className="bg-white/20 backdrop-blur-lg p-6 rounded-3xl border border-white/30">
           <Text className="text-white/80 text-sm font-medium mb-2">Current Month</Text>
-          <Text className="text-white text-5xl font-bold mb-1">${balance.toFixed(2)}</Text>
+          <Text className="text-white text-5xl font-bold mb-1">{balance.toFixed(2)}€</Text>
           <Text className="text-white/70 text-xs">{now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</Text>
         </View>
       </View>
@@ -102,7 +101,7 @@ export default function Home() {
               </View>
             </View>
             <Text className={`text-lg font-bold ${tx.type === 'income' ? 'text-emerald-600' : 'text-rose-600'}`}>
-              {tx.type === 'income' ? '+' : '-'}${tx.amount.toFixed(2)}
+              {tx.type === 'income' ? '+' : '-'}{tx.amount.toFixed(2)}€
             </Text>
           </View>
         ))}

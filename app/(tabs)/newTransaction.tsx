@@ -1,11 +1,13 @@
 import { useRouter } from 'expo-router'
 import React, { useEffect, useState } from 'react'
 import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native'
-import { addCategory, addTransaction, deleteCategory, getCategories } from '../database/database'
+import { addCategory, addRecurringTransaction, addTransaction, deleteCategory, getCategories } from '../database/database'
 import { Category } from '../types'
+import { processRecurringTransactions } from '../utils/recurringProcessor'
 
 export default function NewTransaction() {
   const router = useRouter()
+  const [transactionMode, setTransactionMode] = useState<'normal' | 'recurring'>('normal')
   const [type, setType] = useState<'income' | 'expense'>('expense')
   const [amount, setAmount] = useState('')
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null)
@@ -13,6 +15,11 @@ export default function NewTransaction() {
   const [showCategoryModal, setShowCategoryModal] = useState(false)
   const [newCategoryName, setNewCategoryName] = useState('')
   const [description, setDescription] = useState('')
+  
+  // Recurring transaction fields
+  const [startDate, setStartDate] = useState(new Date())
+  const [endDate, setEndDate] = useState<Date | null>(null)
+  const [hasEndDate, setHasEndDate] = useState(false)
 
   useEffect(() => {
     loadCategories()
@@ -33,7 +40,7 @@ export default function NewTransaction() {
   const handleCreateCategory = async () => {
     if (newCategoryName.trim()) {
       try {
-        await addCategory({ name: newCategoryName.trim() })
+        await addCategory(newCategoryName.trim())
         await loadCategories()
         const newCat = categories.find(c => c.name === newCategoryName.trim())
         if (newCat) setSelectedCategory(newCat)
@@ -69,24 +76,73 @@ export default function NewTransaction() {
 };
 
   const handleSubmit = async () => {
-    if (!selectedCategory || !amount || !type) {
+    if (!selectedCategory || !amount) {
       alert("Please fill in all required fields")
       return
     }
+
     try {
-      await addTransaction({
-        type: type as 'income' | 'expense',
-        amount: parseFloat(amount),
-        category_id: selectedCategory.id,
-        description,
-        created_at: new Date().toISOString(),
-      })
+      if (transactionMode === 'normal') {
+        await addTransaction({
+          type: type as 'income' | 'expense',
+          amount: parseFloat(amount),
+          category_id: selectedCategory.id,
+          description,
+          created_at: new Date().toISOString(),
+        })
+      } else {
+        // Recurring transaction
+        if (!description.trim()) {
+          alert("Description is required for recurring transactions")
+          return
+        }
+
+        await addRecurringTransaction({
+          type: type as 'income' | 'expense',
+          amount: parseFloat(amount),
+          category_id: selectedCategory.id,
+          description: description.trim(),
+          start_date: startDate.toISOString(),
+          end_date: hasEndDate && endDate ? endDate.toISOString() : undefined
+        })
+        
+        // Process recurring transactions immediately to create actual transactions
+        await processRecurringTransactions()
+      }
+      
       setAmount('')
       setDescription('')
       setSelectedCategory(null)
+      setStartDate(new Date())
+      setEndDate(null)
+      setHasEndDate(false)
       router.back()
     } catch (error) {
       console.error('Error adding transaction:', error)
+    }
+  }
+
+  const formatDate = (date: Date) => {
+    return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+  }
+
+  const incrementMonth = (date: Date, setter: (date: Date) => void) => {
+    const newDate = new Date(date)
+    newDate.setMonth(newDate.getMonth() + 1)
+    setter(newDate)
+  }
+
+  const decrementMonth = (date: Date, setter: (date: Date) => void) => {
+    const newDate = new Date(date)
+    newDate.setMonth(newDate.getMonth() - 1)
+    
+    // Don't allow going before current month
+    const now = new Date()
+    now.setDate(1)
+    now.setHours(0, 0, 0, 0)
+    
+    if (newDate >= now) {
+      setter(newDate)
     }
   }
 
@@ -113,6 +169,33 @@ export default function NewTransaction() {
 
       {/* Form Content */}
       <View className="px-6 -mt-4">
+        {/* Transaction Mode Selector */}
+        <View className="bg-white rounded-3xl shadow-md p-2 mb-6 flex-row">
+          <TouchableOpacity
+            onPress={() => setTransactionMode('normal')}
+            className={`flex-1 py-4 rounded-2xl ${
+              transactionMode === 'normal' ? 'bg-blue-600' : 'bg-transparent'
+            }`}
+          >
+            <Text className={`text-center font-bold text-base ${
+              transactionMode === 'normal' ? 'text-white' : 'text-gray-600'
+            }`}>
+              Normal
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setTransactionMode('recurring')}
+            className={`flex-1 py-4 rounded-2xl ${
+              transactionMode === 'recurring' ? 'bg-blue-600' : 'bg-transparent'
+            }`}
+          >
+            <Text className={`text-center font-bold text-base ${
+              transactionMode === 'recurring' ? 'text-white' : 'text-gray-600'
+            }`}>
+              Recurring
+            </Text>
+          </TouchableOpacity>
+        </View>
         {/* Transaction Type Selector */}
         <View className="bg-white rounded-3xl shadow-md p-2 mb-6 flex-row">
           <TouchableOpacity
@@ -157,6 +240,104 @@ export default function NewTransaction() {
           </View>
         </View>
 
+        {/* Recurring: Start Date */}
+        {transactionMode === 'recurring' && (
+          <View className="bg-white rounded-2xl shadow-sm p-4 mb-3 border border-gray-100">
+            <Text className="text-gray-500 text-xs font-semibold mb-2">Start Month</Text>
+            <View className="flex-row items-center justify-between">
+              <TouchableOpacity 
+                onPress={() => {
+                  const now = new Date()
+                  now.setDate(1)
+                  now.setHours(0, 0, 0, 0)
+                  
+                  const currentStart = new Date(startDate)
+                  currentStart.setDate(1)
+                  currentStart.setHours(0, 0, 0, 0)
+                  
+                  if (currentStart > now) {
+                    decrementMonth(startDate, setStartDate)
+                  }
+                }}
+                className="bg-blue-100 rounded-lg p-2"
+                disabled={(() => {
+                  const now = new Date()
+                  now.setDate(1)
+                  now.setHours(0, 0, 0, 0)
+                  
+                  const currentStart = new Date(startDate)
+                  currentStart.setDate(1)
+                  currentStart.setHours(0, 0, 0, 0)
+                  
+                  return currentStart <= now
+                })()}
+                style={{ opacity: (() => {
+                  const now = new Date()
+                  now.setDate(1)
+                  now.setHours(0, 0, 0, 0)
+                  
+                  const currentStart = new Date(startDate)
+                  currentStart.setDate(1)
+                  currentStart.setHours(0, 0, 0, 0)
+                  
+                  return currentStart <= now ? 0.3 : 1
+                })() }}
+              >
+                <Text className="text-blue-600 font-bold text-xl">←</Text>
+              </TouchableOpacity>
+              <Text className="text-gray-900 text-lg font-bold">{formatDate(startDate)}</Text>
+              <TouchableOpacity 
+                onPress={() => incrementMonth(startDate, setStartDate)}
+                className="bg-blue-100 rounded-lg p-2"
+              >
+                <Text className="text-blue-600 font-bold text-xl">→</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* Recurring: End Date Toggle */}
+        {transactionMode === 'recurring' && (
+          <View className="bg-white rounded-2xl shadow-sm p-4 mb-3 border border-gray-100">
+            <View className="flex-row items-center justify-between mb-2">
+              <Text className="text-gray-500 text-xs font-semibold">Set End Date?</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setHasEndDate(!hasEndDate)
+                  if (!hasEndDate && !endDate) {
+                    const defaultEnd = new Date(startDate)
+                    defaultEnd.setMonth(defaultEnd.getMonth() + 12)
+                    setEndDate(defaultEnd)
+                  }
+                }}
+                className={`px-4 py-2 rounded-lg ${hasEndDate ? 'bg-blue-600' : 'bg-gray-200'}`}
+              >
+                <Text className={`font-semibold ${hasEndDate ? 'text-white' : 'text-gray-600'}`}>
+                  {hasEndDate ? 'Yes' : 'No'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            
+            {hasEndDate && endDate && (
+              <View className="flex-row items-center justify-between mt-2">
+                <TouchableOpacity 
+                  onPress={() => decrementMonth(endDate, setEndDate)}
+                  className="bg-blue-100 rounded-lg p-2"
+                >
+                  <Text className="text-blue-600 font-bold text-xl">←</Text>
+                </TouchableOpacity>
+                <Text className="text-gray-900 text-lg font-bold">{formatDate(endDate)}</Text>
+                <TouchableOpacity 
+                  onPress={() => incrementMonth(endDate, setEndDate)}
+                  className="bg-blue-100 rounded-lg p-2"
+                >
+                  <Text className="text-blue-600 font-bold text-xl">→</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        )}
+
         {/* Category Dropdown */}
         <View className="bg-white rounded-2xl shadow-sm p-4 mb-3 border border-gray-100">
           <Text className="text-gray-500 text-xs font-semibold mb-2">Category</Text>
@@ -173,7 +354,9 @@ export default function NewTransaction() {
 
         {/* Description Input */}
         <View className="bg-white rounded-2xl shadow-sm p-4 mb-6 border border-gray-100">
-          <Text className="text-gray-500 text-xs font-semibold mb-2">Description (Optional)</Text>
+          <Text className="text-gray-500 text-xs font-semibold mb-2">
+            Description {transactionMode === 'recurring' && '(Required)'}
+          </Text>
           <TextInput
             className="text-gray-900 text-base font-medium"
             placeholder="Add notes..."
@@ -198,8 +381,10 @@ export default function NewTransaction() {
           }}
         >
           <Text className="text-white text-center text-lg font-bold">
-            Add Transaction
+            {transactionMode === 'normal' ? 'Add Transaction' : 'Add Recurring Transaction'}
           </Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Category Modal */}
       <Modal
@@ -227,7 +412,6 @@ export default function NewTransaction() {
                     setSelectedCategory(cat)
                   }}
                   onLongPress={() => handleCategoryLongPress(cat)}
-
                   className={`p-4 rounded-xl mb-2 border ${
                     selectedCategory?.id === cat.id
                       ? 'bg-blue-50 border-blue-500'
@@ -272,9 +456,6 @@ export default function NewTransaction() {
           </View>
         </View>
       </Modal>
-
-        </TouchableOpacity>
-      </View>
     </ScrollView>
     </KeyboardAvoidingView>
   )
