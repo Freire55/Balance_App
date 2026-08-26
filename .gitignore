@@ -1,43 +1,159 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
-
-# dependencies
+# =============================================================================
+# Dependencies & Package Managers
+# =============================================================================
 node_modules/
+.pnp
+.pnp.js
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnpm-store/
 
-# Expo
+# =============================================================================
+# Expo & Metro Bundler
+# =============================================================================
 .expo/
+.expo-shared/
 dist/
 web-build/
 expo-env.d.ts
+.metro-health-check*
 
-# Native
-.kotlin/
+# =============================================================================
+# Build Artifacts & Binaries
+# =============================================================================
+*.apk
+*.ap_
+*.aab
+*.dex
+*.class
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# =============================================================================
+# Native Projects (Expo Prebuild / Ephemeral Directories)
+# =============================================================================
+# If using continuous prebuild (default in managed Expo), ignore native folders.
+# Uncomment if managing bare native projects directly.
+/android/
+/ios/
+
+# =============================================================================
+# Android Native Build Cache & Secrets
+# =============================================================================
+android/.gradle/
+android/build/
+android/app/build/
+android/captures/
+android/.cxx/
+android/local.properties
+android/key.properties
 *.orig.*
+
+# Keystores and Certificates
+*.keystore
 *.jks
 *.p8
 *.p12
 *.key
+*.pem
 *.mobileprovision
 
-# Metro
-.metro-health-check*
+# Keep default debug keystore if explicitly needed
+!android/app/debug.keystore
 
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
+# =============================================================================
+# iOS Native Build Cache & CocoaPods
+# =============================================================================
+ios/build/
+ios/Pods/
+ios/DerivedData/
+ios/*.xcworkspace/xcuserdata/
+ios/*.xcodeproj/xcuserdata/
+ios/*.xcodeproj/project.xcworkspace/xcuserdata/
 
+# =============================================================================
+# Environment Variables & Private Secrets
+# =============================================================================
+.env
+.env*.local
+.env.production
+.env.staging
+.env.test
+credentials.json
+
+# =============================================================================
+# TypeScript & Build Caches
+# =============================================================================
+*.tsbuildinfo
+.kotlin/
+.cache/
+.eslintcache
+.stylelintcache
+
+# =============================================================================
+# Logs & Debug Output
+# =============================================================================
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.log
+
+# =============================================================================
+# Testing & Code Coverage
+# =============================================================================
+coverage/
+.nyc_output/
+*.lcov
+
+# =============================================================================
+# IDE & System Files
+# =============================================================================
 # macOS
 .DS_Store
-*.pem
+.AppleDouble
+.LSOverride
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
 
-# local env files
-.env*.local
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
 
-# typescript
-*.tsbuildinfo
+# Linux
+*~
+.directory
+.trash
 
-app-example
+# Editors
+.idea/
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
 
-# generated native folders
-/ios
-/android
+# VS Code (preserve team configuration)
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# =============================================================================
+# Boilerplate / Example Folders
+# =============================================================================
+app-example/
+
