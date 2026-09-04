@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "expo-sqlite": ["tests/mocks/expo-sqlite.ts"],
+      "react-native": ["tests/mocks/react-native.ts"],
+      "expo-file-system": ["tests/mocks/expo-file-system.ts"],
+      "expo-sharing": ["tests/mocks/expo-sharing.ts"],
+      "expo-notifications": ["tests/mocks/expo-notifications.ts"],
+      "expo-haptics": ["tests/mocks/expo-haptics.ts"],
+      "@/*": ["./*"]
+    }
+  }
+}

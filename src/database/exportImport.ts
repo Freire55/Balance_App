@@ -1,7 +1,7 @@
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { connectDb } from './database';
-import { Category, DatabaseBackup, RecurringTransaction, Transaction } from './types';
+import { Category, DatabaseBackup, FinanceEvent, RecurringTransaction, Transaction } from './types';
 
 /**
  * High-performance streaming CSV export for transactions.
@@ -19,6 +19,7 @@ export async function exportTransactionsToCsv(): Promise<{ success: boolean; uri
       category: string;
       amount: number;
       description: string | null;
+      tags: string | null;
       is_recurring: number;
     }>(`
       SELECT 
@@ -28,6 +29,7 @@ export async function exportTransactionsToCsv(): Promise<{ success: boolean; uri
         COALESCE(c.name, 'Uncategorized') as category,
         t.amount,
         t.description,
+        t.tags,
         CASE WHEN t.recurring_rule_id IS NOT NULL THEN 1 ELSE 0 END as is_recurring
       FROM transactions t
       LEFT JOIN categories c ON t.category_id = c.id
@@ -45,7 +47,7 @@ export async function exportTransactionsToCsv(): Promise<{ success: boolean; uri
       return `"${clean}"`;
     };
 
-    const header = ['ID', 'Date', 'Type', 'Category', 'Amount', 'Description', 'Recurring'].join(',');
+    const header = ['ID', 'Date', 'Type', 'Category', 'Amount', 'Description', 'Tags', 'Recurring'].join(',');
     const lines = rows.map((r) => [
       r.id,
       escapeCsv(r.date),
@@ -53,6 +55,7 @@ export async function exportTransactionsToCsv(): Promise<{ success: boolean; uri
       escapeCsv(r.category),
       r.amount.toFixed(2),
       escapeCsv(r.description || ''),
+      escapeCsv(r.tags || ''),
       r.is_recurring ? 'Yes' : 'No',
     ].join(','));
 
@@ -92,6 +95,10 @@ export async function createFullBackupJson(): Promise<string> {
   const categories = await db.getAllAsync<Category>(`SELECT * FROM categories ORDER BY id ASC`.trim());
   const transactions = await db.getAllAsync<Transaction>(`SELECT * FROM transactions ORDER BY id ASC`.trim());
   const recurring = await db.getAllAsync<RecurringTransaction>(`SELECT * FROM recurring_transactions ORDER BY id ASC`.trim());
+  const budgets = await db.getAllAsync<any>(`SELECT * FROM budgets ORDER BY id ASC`.trim());
+  const savingsGoals = await db.getAllAsync<any>(`SELECT * FROM savings_goals ORDER BY id ASC`.trim());
+  const quickShortcuts = await db.getAllAsync<any>(`SELECT * FROM quick_shortcuts ORDER BY id ASC`.trim());
+  const financeEvents = await db.getAllAsync<FinanceEvent>(`SELECT * FROM finance_events ORDER BY id ASC`.trim());
   const settingsRows = await db.getAllAsync<{ key: string; value: string }>(`SELECT * FROM app_settings`.trim());
 
   const settings: Record<string, string> = {};
@@ -100,12 +107,15 @@ export async function createFullBackupJson(): Promise<string> {
   }
 
   const backup: DatabaseBackup = {
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
     categories,
     transactions,
     recurringTransactions: recurring,
-    budgets: [],
+    budgets,
+    savingsGoals,
+    quickShortcuts,
+    financeEvents,
     settings,
   };
 
@@ -160,6 +170,10 @@ export async function restoreFromBackupJson(jsonString: string): Promise<{ succe
       await db.execAsync(`
         DELETE FROM transactions;
         DELETE FROM recurring_transactions;
+        DELETE FROM budgets;
+        DELETE FROM savings_goals;
+        DELETE FROM quick_shortcuts;
+        DELETE FROM finance_events;
         DELETE FROM categories;
         DELETE FROM sqlite_sequence;
       `);
@@ -172,12 +186,22 @@ export async function restoreFromBackupJson(jsonString: string): Promise<{ succe
         );
       }
 
+      // Restore finance events (events / trips) before transactions for FK consistency
+      if (Array.isArray(data.financeEvents)) {
+        for (const evt of data.financeEvents) {
+          await db.runAsync(
+            `INSERT INTO finance_events (id, name, description, icon, color, budget, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`.trim(),
+            [evt.id, evt.name, evt.description || null, evt.icon || 'flight', evt.color || '#F43F5E', evt.budget || 0, evt.created_at || new Date().toISOString()]
+          );
+        }
+      }
+
       // Restore transactions
       for (const tx of data.transactions) {
         await db.runAsync(
-          `INSERT INTO transactions (id, type, amount, category_id, description, created_at, recurring_rule_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`.trim(),
-          [tx.id, tx.type, tx.amount, tx.category_id, tx.description || null, tx.created_at, tx.recurring_rule_id || null]
+          `INSERT INTO transactions (id, type, amount, category_id, description, tags, created_at, recurring_rule_id, event_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`.trim(),
+          [tx.id, tx.type, tx.amount, tx.category_id || null, tx.description || null, tx.tags || null, tx.created_at, tx.recurring_rule_id || null, tx.event_id || null]
         );
       }
 
@@ -188,6 +212,37 @@ export async function restoreFromBackupJson(jsonString: string): Promise<{ succe
             `INSERT INTO recurring_transactions (id, type, amount, category_id, description, frequency, day_of_month, start_date, end_date, is_active, last_processed_date)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`.trim(),
             [rec.id, rec.type, rec.amount, rec.category_id, rec.description || null, rec.frequency || 'monthly', rec.day_of_month || 1, rec.start_date, rec.end_date || null, rec.is_active ?? 1, rec.last_processed_date || null]
+          );
+        }
+      }
+
+      // Restore budgets
+      if (Array.isArray(data.budgets)) {
+        for (const b of data.budgets) {
+          await db.runAsync(
+            `INSERT INTO budgets (id, category_id, monthly_limit, created_at) VALUES (?, ?, ?, ?)`.trim(),
+            [b.id, b.category_id, b.monthly_limit, b.created_at || new Date().toISOString()]
+          );
+        }
+      }
+
+      // Restore savings goals
+      if (Array.isArray(data.savingsGoals)) {
+        for (const g of data.savingsGoals) {
+          await db.runAsync(
+            `INSERT INTO savings_goals (id, name, target_amount, current_amount, target_date, icon, color, is_completed, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`.trim(),
+            [g.id, g.name, g.target_amount, g.current_amount, g.target_date || null, g.icon || 'savings', g.color || '#10B981', g.is_completed ?? 0, g.created_at || new Date().toISOString()]
+          );
+        }
+      }
+
+      // Restore quick shortcuts
+      if (Array.isArray(data.quickShortcuts)) {
+        for (const qs of data.quickShortcuts) {
+          await db.runAsync(
+            `INSERT INTO quick_shortcuts (id, title, icon, amount, category_id, type) VALUES (?, ?, ?, ?, ?, ?)`.trim(),
+            [qs.id, qs.title, qs.icon, qs.amount, qs.category_id, qs.type || 'expense']
           );
         }
       }

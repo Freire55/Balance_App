@@ -28,7 +28,7 @@ export default function NavBar({ state, navigation }: BottomTabBarProps) {
     },
     {
       name: 'Stats',
-      label: 'Stats',
+      label: 'Analytics',
       icon: 'insights' as const,
     },
     {
@@ -65,21 +65,16 @@ export default function NavBar({ state, navigation }: BottomTabBarProps) {
           onPress={() => handleTabPress(tabs[0].name)}
           className="items-center justify-center flex-1 py-1"
         >
-          <View
-            style={{
-              backgroundColor: currentRouteName === 'Home' ? '#EEF2FF' : 'transparent',
-            }}
-            className="w-10 h-7 rounded-full items-center justify-center"
-          >
+          <View className="w-10 h-7 items-center justify-center">
             <MaterialIcons
               name={tabs[0].icon}
-              size={22}
-              color={currentRouteName === 'Home' ? '#6366F1' : theme.textMuted}
+              size={24}
+              color={currentRouteName === 'Home' ? theme.primary : theme.textMuted}
             />
           </View>
           <Text
             style={{
-              color: currentRouteName === 'Home' ? '#6366F1' : theme.textSecondary,
+              color: currentRouteName === 'Home' ? theme.primary : theme.textSecondary,
             }}
             className="text-[11px] font-semibold mt-0.5"
           >
@@ -93,21 +88,16 @@ export default function NavBar({ state, navigation }: BottomTabBarProps) {
           onPress={() => handleTabPress(tabs[1].name)}
           className="items-center justify-center flex-1 py-1"
         >
-          <View
-            style={{
-              backgroundColor: currentRouteName === 'History' ? '#EEF2FF' : 'transparent',
-            }}
-            className="w-10 h-7 rounded-full items-center justify-center"
-          >
+          <View className="w-10 h-7 items-center justify-center">
             <MaterialIcons
               name={tabs[1].icon}
-              size={22}
-              color={currentRouteName === 'History' ? '#6366F1' : theme.textMuted}
+              size={24}
+              color={currentRouteName === 'History' ? theme.primary : theme.textMuted}
             />
           </View>
           <Text
             style={{
-              color: currentRouteName === 'History' ? '#6366F1' : theme.textSecondary,
+              color: currentRouteName === 'History' ? theme.primary : theme.textSecondary,
             }}
             className="text-[11px] font-semibold mt-0.5"
           >
@@ -121,10 +111,10 @@ export default function NavBar({ state, navigation }: BottomTabBarProps) {
             activeOpacity={0.85}
             onPress={handleQuickAddPress}
             style={{
-              backgroundColor: '#6366F1',
+              backgroundColor: theme.primary,
               borderColor: theme.card,
               borderWidth: 4,
-              shadowColor: '#6366F1',
+              shadowColor: theme.primary,
               shadowOffset: { width: 0, height: 6 },
               shadowOpacity: 0.35,
               shadowRadius: 10,
@@ -142,21 +132,16 @@ export default function NavBar({ state, navigation }: BottomTabBarProps) {
           onPress={() => handleTabPress(tabs[2].name)}
           className="items-center justify-center flex-1 py-1"
         >
-          <View
-            style={{
-              backgroundColor: currentRouteName === 'Stats' ? '#EEF2FF' : 'transparent',
-            }}
-            className="w-10 h-7 rounded-full items-center justify-center"
-          >
+          <View className="w-10 h-7 items-center justify-center">
             <MaterialIcons
               name={tabs[2].icon}
-              size={22}
-              color={currentRouteName === 'Stats' ? '#6366F1' : theme.textMuted}
+              size={24}
+              color={currentRouteName === 'Stats' ? theme.primary : theme.textMuted}
             />
           </View>
           <Text
             style={{
-              color: currentRouteName === 'Stats' ? '#6366F1' : theme.textSecondary,
+              color: currentRouteName === 'Stats' ? theme.primary : theme.textSecondary,
             }}
             className="text-[11px] font-semibold mt-0.5"
           >
@@ -170,21 +155,16 @@ export default function NavBar({ state, navigation }: BottomTabBarProps) {
           onPress={() => handleTabPress(tabs[3].name)}
           className="items-center justify-center flex-1 py-1"
         >
-          <View
-            style={{
-              backgroundColor: currentRouteName === 'Settings' ? '#EEF2FF' : 'transparent',
-            }}
-            className="w-10 h-7 rounded-full items-center justify-center"
-          >
+          <View className="w-10 h-7 items-center justify-center">
             <MaterialIcons
               name={tabs[3].icon}
-              size={22}
-              color={currentRouteName === 'Settings' ? '#6366F1' : theme.textMuted}
+              size={24}
+              color={currentRouteName === 'Settings' ? theme.primary : theme.textMuted}
             />
           </View>
           <Text
             style={{
-              color: currentRouteName === 'Settings' ? '#6366F1' : theme.textSecondary,
+              color: currentRouteName === 'Settings' ? theme.primary : theme.textSecondary,
             }}
             className="text-[11px] font-semibold mt-0.5"
           >

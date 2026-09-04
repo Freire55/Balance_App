@@ -13,7 +13,7 @@ interface MetricCardProps {
   trendPositive?: boolean;
 }
 
-export const MetricCard: React.FC<MetricCardProps> = ({
+export const MetricCard: React.FC<MetricCardProps> = React.memo(({
   title,
   amount,
   type = 'neutral',
@@ -22,31 +22,31 @@ export const MetricCard: React.FC<MetricCardProps> = ({
   trend,
   trendPositive,
 }) => {
-  const { formatCurrency, theme } = useApp();
+  const { formatCurrency, theme, isDark } = useApp();
 
   const getColors = () => {
     switch (type) {
       case 'income':
         return {
-          iconBg: '#ECFDF5',
-          iconColor: '#059669',
-          textColor: '#059669',
+          iconBg: isDark ? 'rgba(16, 185, 129, 0.2)' : '#ECFDF5',
+          iconColor: isDark ? '#34D399' : '#059669',
+          textColor: isDark ? '#34D399' : '#059669',
         };
       case 'expense':
         return {
-          iconBg: '#FFF1F2',
-          iconColor: '#E11D48',
-          textColor: '#E11D48',
+          iconBg: isDark ? 'rgba(244, 63, 94, 0.2)' : '#FFF1F2',
+          iconColor: isDark ? '#FB7185' : '#E11D48',
+          textColor: isDark ? '#FB7185' : '#E11D48',
         };
       case 'balance':
         return {
-          iconBg: '#EEF2FF',
-          iconColor: '#4F46E5',
+          iconBg: isDark ? 'rgba(99, 102, 241, 0.2)' : '#EEF2FF',
+          iconColor: isDark ? '#818CF8' : '#4F46E5',
           textColor: theme.textPrimary,
         };
       default:
         return {
-          iconBg: '#F1F5F9',
+          iconBg: isDark ? 'rgba(148, 163, 184, 0.15)' : '#F1F5F9',
           iconColor: theme.textSecondary,
           textColor: theme.textPrimary,
         };
@@ -63,7 +63,7 @@ export const MetricCard: React.FC<MetricCardProps> = ({
         borderWidth: 1,
         shadowColor: '#000000',
         shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.05,
+        shadowOpacity: isDark ? 0.2 : 0.05,
         shadowRadius: 3,
         elevation: 1,
       }}
@@ -112,11 +112,11 @@ export const MetricCard: React.FC<MetricCardProps> = ({
           <MaterialIcons
             name={trendPositive ? 'trending-up' : 'trending-down'}
             size={14}
-            color={trendPositive ? '#10B981' : '#F43F5E'}
+            color={trendPositive ? (isDark ? '#34D399' : '#10B981') : (isDark ? '#FB7185' : '#F43F5E')}
           />
           <Text
             style={{
-              color: trendPositive ? '#10B981' : '#F43F5E',
+              color: trendPositive ? (isDark ? '#34D399' : '#10B981') : (isDark ? '#FB7185' : '#F43F5E'),
             }}
             className="text-xs font-semibold ml-1"
           >
@@ -126,4 +126,6 @@ export const MetricCard: React.FC<MetricCardProps> = ({
       ) : null}
     </View>
   );
-};
+});
+
+MetricCard.displayName = 'MetricCard';

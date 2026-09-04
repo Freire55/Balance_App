@@ -13,7 +13,7 @@ interface EmptyStateProps {
   onSecondaryAction?: () => void;
 }
 
-export const EmptyState: React.FC<EmptyStateProps> = ({
+export const EmptyState: React.FC<EmptyStateProps> = React.memo(({
   icon = 'receipt-long',
   title,
   description,
@@ -22,7 +22,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   secondaryActionText,
   onSecondaryAction,
 }) => {
-  const { theme } = useApp();
+  const { theme, isDark } = useApp();
 
   return (
     <View
@@ -35,11 +35,11 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
     >
       <View
         style={{
-          backgroundColor: '#EEF2FF',
+          backgroundColor: isDark ? 'rgba(99, 102, 241, 0.2)' : '#EEF2FF',
         }}
         className="w-16 h-16 rounded-2xl items-center justify-center mb-4"
       >
-        <MaterialIcons name={icon} size={32} color="#4F46E5" />
+        <MaterialIcons name={icon} size={32} color={theme.primary} />
       </View>
       <Text
         style={{ color: theme.textPrimary }}
@@ -57,7 +57,8 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
       {actionText && onAction && (
         <TouchableOpacity
           onPress={onAction}
-          className="bg-indigo-600 px-6 py-3 rounded-xl flex-row items-center justify-center shadow-sm w-full max-w-xs"
+          style={{ backgroundColor: theme.primary }}
+          className="px-6 py-3.5 rounded-xl flex-row items-center justify-center shadow-sm w-full max-w-xs"
         >
           <MaterialIcons name="add" size={20} color="white" />
           <Text className="text-white font-semibold text-sm ml-1.5">{actionText}</Text>
@@ -70,8 +71,8 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
           className="mt-3 py-2 px-4 rounded-xl items-center justify-center"
         >
           <Text
-            style={{ color: '#4F46E5' }}
-            className="font-semibold text-sm"
+            style={{ color: theme.primary }}
+            className="font-semibold text-sm text-center"
           >
             {secondaryActionText}
           </Text>
@@ -79,4 +80,6 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
       )}
     </View>
   );
-};
+});
+
+EmptyState.displayName = 'EmptyState';

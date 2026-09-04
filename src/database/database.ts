@@ -1,14 +1,20 @@
 import * as SQLite from "expo-sqlite";
 import { runMigrations } from "./migrations";
 import {
+  AppNotification,
   AppSettings,
+  Budget,
   Category,
   CategoryBreakdown,
+  FinanceEvent,
   PaginatedTransactions,
   PeriodSummary,
+  QuickShortcut,
   RecurringTransaction,
+  SavingsGoal,
   Transaction,
   TransactionFilterOptions,
+  TransactionType,
   TrendDataPoint,
 } from "./types";
 
@@ -16,6 +22,11 @@ let dbInstance: SQLite.SQLiteDatabase | null = null;
 let dbInitPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 // --- DATABASE CONNECTION & PRAGMA OPTIMIZATIONS ---
+
+export const setDbInstance = (db: SQLite.SQLiteDatabase | null): void => {
+  dbInstance = db;
+  dbInitPromise = db ? Promise.resolve(db) : null;
+};
 
 export const connectDb = async (): Promise<SQLite.SQLiteDatabase> => {
   if (dbInstance) {
@@ -31,6 +42,7 @@ export const connectDb = async (): Promise<SQLite.SQLiteDatabase> => {
         PRAGMA foreign_keys = ON;
         PRAGMA temp_store = MEMORY;
         PRAGMA cache_size = -64000;
+        PRAGMA mmap_size = 268435456;
       `);
       dbInstance = db;
       return db;
@@ -71,27 +83,49 @@ export const addTransaction = async (
   transaction: Omit<Transaction, "id">
 ): Promise<number> => {
   const db = await connectDb();
-  const { type, amount, category_id, description, created_at, recurring_rule_id } = transaction;
+  const { type, amount, category_id, description, tags, created_at, recurring_rule_id, event_id } = transaction;
+
+  const validCreatedAt = created_at && !isNaN(new Date(created_at).getTime())
+    ? created_at
+    : new Date().toISOString();
 
   const result = await db.runAsync(
-    `INSERT INTO transactions (type, amount, category_id, description, created_at, recurring_rule_id) 
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [type, amount, category_id || null, description?.trim() || null, created_at, recurring_rule_id || null]
+    `INSERT INTO transactions (type, amount, category_id, description, tags, created_at, recurring_rule_id, event_id) 
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      type,
+      amount,
+      category_id || null,
+      description?.trim() || null,
+      tags?.trim() || null,
+      validCreatedAt,
+      recurring_rule_id || null,
+      event_id || null,
+    ]
   );
   return result.lastInsertRowId;
 };
 
 export const editTransaction = async (
-  transaction: Pick<Transaction, "id" | "type" | "amount" | "category_id" | "description" | "created_at">
+  transaction: Pick<Transaction, "id" | "type" | "amount" | "category_id" | "description" | "tags" | "created_at" | "event_id">
 ): Promise<void> => {
   const db = await connectDb();
-  const { id, type, amount, category_id, description, created_at } = transaction;
+  const { id, type, amount, category_id, description, tags, created_at, event_id } = transaction;
 
   await db.runAsync(
     `UPDATE transactions 
-     SET type = ?, amount = ?, category_id = ?, description = ?, created_at = ? 
+     SET type = ?, amount = ?, category_id = ?, description = ?, tags = ?, created_at = ?, event_id = ? 
      WHERE id = ?`,
-    [type, amount, category_id || null, description?.trim() || null, created_at, id]
+    [
+      type,
+      amount,
+      category_id || null,
+      description?.trim() || null,
+      tags?.trim() || null,
+      created_at,
+      event_id || null,
+      id,
+    ]
   );
 };
 
@@ -104,12 +138,16 @@ export const getTransactionById = async (id: number): Promise<Transaction | null
   const db = await connectDb();
   const rows = await db.getAllAsync<Transaction>(`
     SELECT 
-      t.id, t.type, t.amount, t.category_id, t.description, t.created_at, t.recurring_rule_id,
+      t.id, t.type, t.amount, t.category_id, t.event_id, t.description, t.tags, t.created_at, t.recurring_rule_id,
       c.name as category_name, 
       c.icon as category_icon, 
-      c.color as category_color 
+      c.color as category_color,
+      e.name as event_name,
+      e.icon as event_icon,
+      e.color as event_color
     FROM transactions t
     LEFT JOIN categories c ON t.category_id = c.id
+    LEFT JOIN finance_events e ON t.event_id = e.id
     WHERE t.id = ?
   `, [id]);
   return rows[0] || null;
@@ -126,7 +164,9 @@ export const getFilteredTransactions = async (
   const {
     type,
     categoryId,
+    eventId,
     searchQuery,
+    tag,
     startDate,
     endDate,
     minAmount,
@@ -153,6 +193,14 @@ export const getFilteredTransactions = async (
     }
   }
 
+  if (eventId !== undefined && eventId !== "all" && eventId !== null) {
+    const numericEventId = typeof eventId === "number" ? eventId : parseInt(String(eventId), 10);
+    if (!isNaN(numericEventId)) {
+      conditions.push("t.event_id = ?");
+      params.push(numericEventId);
+    }
+  }
+
   if (typeof startDate === "string" && startDate.trim().length > 0) {
     conditions.push("t.created_at >= ?");
     params.push(startDate.trim());
@@ -175,18 +223,30 @@ export const getFilteredTransactions = async (
 
   if (typeof searchQuery === "string" && searchQuery.trim().length > 0) {
     const term = `%${searchQuery.trim()}%`;
-    conditions.push("(t.description LIKE ? OR c.name LIKE ?)");
-    params.push(term, term);
+    conditions.push("(t.description LIKE ? OR c.name LIKE ? OR e.name LIKE ? OR t.tags LIKE ?)");
+    params.push(term, term, term, term);
+  }
+
+  if (typeof tag === "string" && tag.trim().length > 0) {
+    conditions.push("t.tags LIKE ?");
+    params.push(`%${tag.trim()}%`);
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-  // 1. Total Count (No trailing semicolon)
-  const countSql = `SELECT COUNT(*) as total FROM transactions t LEFT JOIN categories c ON t.category_id = c.id ${whereClause}`.trim();
-  const countResult = params.length > 0
-    ? await db.getAllAsync<{ total: number }>(countSql, params)
-    : await db.getAllAsync<{ total: number }>(countSql);
-  const totalCount = countResult[0]?.total || 0;
+  // 1. Total Count: skip on pagination (offset > 0) or when caller specifies skipCount
+  let totalCount = 0;
+  if (!options.skipCount && (!offset || offset === 0)) {
+    const needJoins = typeof searchQuery === "string" && searchQuery.trim().length > 0;
+    const countSql = needJoins
+      ? `SELECT COUNT(*) as total FROM transactions t LEFT JOIN categories c ON t.category_id = c.id LEFT JOIN finance_events e ON t.event_id = e.id ${whereClause}`.trim()
+      : `SELECT COUNT(*) as total FROM transactions t ${whereClause}`.trim();
+
+    const countResult = params.length > 0
+      ? await db.getAllAsync<{ total: number }>(countSql, params)
+      : await db.getAllAsync<{ total: number }>(countSql);
+    totalCount = countResult[0]?.total || 0;
+  }
 
   // 2. Paginated Data (No trailing semicolon)
   const orderCol = orderBy === "amount" ? "t.amount" : "t.created_at";
@@ -194,15 +254,17 @@ export const getFilteredTransactions = async (
   const safeLimit = typeof limit === "number" && !isNaN(limit) && limit > 0 ? limit : 50;
   const safeOffset = typeof offset === "number" && !isNaN(offset) && offset >= 0 ? offset : 0;
 
-  const dataSql = `SELECT t.id, t.type, t.amount, t.category_id, t.description, t.created_at, t.recurring_rule_id, c.name as category_name, c.icon as category_icon, c.color as category_color FROM transactions t LEFT JOIN categories c ON t.category_id = c.id ${whereClause} ORDER BY ${orderCol} ${direction}, t.id DESC LIMIT ? OFFSET ?`.trim();
+  const dataSql = `SELECT t.id, t.type, t.amount, t.category_id, t.event_id, t.description, t.tags, t.created_at, t.recurring_rule_id, c.name as category_name, c.icon as category_icon, c.color as category_color, e.name as event_name, e.icon as event_icon, e.color as event_color FROM transactions t LEFT JOIN categories c ON t.category_id = c.id LEFT JOIN finance_events e ON t.event_id = e.id ${whereClause} ORDER BY ${orderCol} ${direction}, t.id DESC LIMIT ? OFFSET ?`.trim();
 
   const queryParams = [...params, safeLimit, safeOffset];
   const transactions = await db.getAllAsync<Transaction>(dataSql, queryParams);
 
   return {
     transactions,
-    totalCount,
-    hasMore: safeOffset + transactions.length < totalCount,
+    totalCount: totalCount || (options.skipCount ? transactions.length : 0),
+    hasMore: options.skipCount
+      ? transactions.length === safeLimit
+      : (totalCount > 0 ? safeOffset + transactions.length < totalCount : transactions.length === safeLimit),
   };
 };
 
@@ -291,6 +353,131 @@ export const getCategoryBreakdown = async (
     total: r.total,
     count: r.count,
     percentage: overallTotal > 0 ? parseFloat(((r.total / overallTotal) * 100).toFixed(1)) : 0,
+  }));
+};
+
+/**
+ * Event-Aware Category Breakdown:
+ * If expenses are tagged with an event (like 'Summer Vacation'), they roll up into that event
+ * as a parent item with icon/color, and include sub_breakdown for what was spent inside that event
+ * (e.g. food, hotel, transport)! Expenses without an event appear under their regular category.
+ */
+export const getEventAwareBreakdown = async (
+  startDate: string,
+  endDate: string,
+  type: "income" | "expense" = "expense"
+): Promise<CategoryBreakdown[]> => {
+  const db = await connectDb();
+
+  // 1. Regular category breakdown for non-event transactions
+  const nonEventSql = `
+    SELECT 
+      COALESCE(t.category_id, 0) as category_id,
+      COALESCE(c.name, 'Uncategorized') as name,
+      COALESCE(c.icon, 'category') as icon,
+      COALESCE(c.color, '#64748B') as color,
+      t.type as type,
+      SUM(t.amount) as total,
+      COUNT(t.id) as count
+    FROM transactions t
+    LEFT JOIN categories c ON t.category_id = c.id
+    WHERE t.created_at >= ? AND t.created_at <= ? AND t.type = ? AND t.event_id IS NULL
+    GROUP BY t.category_id
+  `.trim();
+
+  // 2. Events total for transactions with an event
+  const eventSql = `
+    SELECT 
+      e.id as event_id,
+      e.name as name,
+      e.icon as icon,
+      e.color as color,
+      t.type as type,
+      SUM(t.amount) as total,
+      COUNT(t.id) as count
+    FROM transactions t
+    INNER JOIN finance_events e ON t.event_id = e.id
+    WHERE t.created_at >= ? AND t.created_at <= ? AND t.type = ?
+    GROUP BY e.id
+  `.trim();
+
+  // 3. Sub-breakdown by category inside those events
+  const eventSubSql = `
+    SELECT 
+      t.event_id,
+      COALESCE(t.category_id, 0) as category_id,
+      COALESCE(c.name, 'Uncategorized') as name,
+      COALESCE(c.icon, 'category') as icon,
+      COALESCE(c.color, '#64748B') as color,
+      t.type as type,
+      SUM(t.amount) as total,
+      COUNT(t.id) as count
+    FROM transactions t
+    LEFT JOIN categories c ON t.category_id = c.id
+    WHERE t.created_at >= ? AND t.created_at <= ? AND t.type = ? AND t.event_id IS NOT NULL
+    GROUP BY t.event_id, t.category_id
+    ORDER BY total DESC
+  `.trim();
+
+  const [nonEventRows, eventRows, eventSubRows] = await Promise.all([
+    db.getAllAsync<any>(nonEventSql, [startDate, endDate, type]),
+    db.getAllAsync<any>(eventSql, [startDate, endDate, type]),
+    db.getAllAsync<any>(eventSubSql, [startDate, endDate, type]),
+  ]);
+
+  const eventSubMap = new Map<number, any[]>();
+  for (const sub of eventSubRows) {
+    if (!eventSubMap.has(sub.event_id)) {
+      eventSubMap.set(sub.event_id, []);
+    }
+    eventSubMap.get(sub.event_id)!.push(sub);
+  }
+
+  const combined = [
+    ...nonEventRows.map((r: any) => ({
+      category_id: r.category_id,
+      name: r.name,
+      icon: r.icon,
+      color: r.color,
+      type: r.type,
+      total: r.total,
+      count: r.count,
+      is_event: false,
+    })),
+    ...eventRows.map((r: any) => {
+      const subs = eventSubMap.get(r.event_id) || [];
+      const subBreakdown = subs.map((s: any) => ({
+        category_id: s.category_id,
+        name: s.name,
+        icon: s.icon,
+        color: s.color,
+        type: r.type,
+        total: s.total,
+        count: s.count,
+        percentage: r.total > 0 ? parseFloat(((s.total / r.total) * 100).toFixed(1)) : 0,
+      }));
+
+      return {
+        category_id: -r.event_id, // Negative ID to avoid collision with category IDs
+        event_id: r.event_id,
+        name: r.name,
+        icon: r.icon,
+        color: r.color,
+        type: r.type,
+        total: r.total,
+        count: r.count,
+        is_event: true,
+        sub_breakdown: subBreakdown,
+      };
+    }),
+  ];
+
+  combined.sort((a, b) => b.total - a.total);
+  const overallTotal = combined.reduce((acc, c) => acc + (c.total || 0), 0);
+
+  return combined.map((c) => ({
+    ...c,
+    percentage: overallTotal > 0 ? parseFloat(((c.total / overallTotal) * 100).toFixed(1)) : 0,
   }));
 };
 
@@ -401,17 +588,12 @@ export const editCategory = async (
   color?: string
 ): Promise<void> => {
   const db = await connectDb();
-  if (icon && color) {
-    await db.runAsync(
-      `UPDATE categories SET name = ?, icon = ?, color = ? WHERE id = ?`,
-      [name.trim(), icon, color, id]
-    );
-  } else {
-    await db.runAsync(
-      `UPDATE categories SET name = ? WHERE id = ?`,
-      [name.trim(), id]
-    );
-  }
+  await db.runAsync(
+    `UPDATE categories 
+     SET name = ?, icon = COALESCE(?, icon), color = COALESCE(?, color) 
+     WHERE id = ?`,
+    [name.trim(), icon || null, color || null, id]
+  );
 };
 
 export const deleteCategory = async (
@@ -427,6 +609,10 @@ export const deleteCategory = async (
     );
     await db.runAsync(
       `UPDATE recurring_transactions SET category_id = ? WHERE category_id = ?`,
+      [fallbackCategoryId || null, id]
+    );
+    await db.runAsync(
+      `UPDATE quick_shortcuts SET category_id = ? WHERE category_id = ?`,
       [fallbackCategoryId || null, id]
     );
     await db.runAsync(`DELETE FROM budgets WHERE category_id = ?`, [id]);
@@ -502,6 +688,414 @@ export const toggleRecurringActive = async (id: number, isActive: boolean): Prom
   );
 };
 
+// --- BUDGETS CRUD & SPENT AGGREGATION ---
+
+export const getBudgets = async (year?: number, month?: number): Promise<Budget[]> => {
+  const db = await connectDb();
+  const now = new Date();
+  const y = year ?? now.getFullYear();
+  const m = month ?? (now.getMonth() + 1);
+  const monthStr = String(m).padStart(2, "0");
+  const lastDay = new Date(y, m, 0).getDate();
+  const startDate = `${y}-${monthStr}-01T00:00:00.000Z`;
+  const endDate = `${y}-${monthStr}-${String(lastDay).padStart(2, "0")}T23:59:59.999Z`;
+
+  // High-performance single-pass JOIN aggregation using covering index
+  const sql = `
+    SELECT 
+      b.id,
+      b.category_id,
+      b.monthly_limit,
+      b.created_at,
+      c.name as category_name,
+      c.icon as category_icon,
+      c.color as category_color,
+      COALESCE(spent.total_spent, 0) as spent_amount
+    FROM budgets b
+    INNER JOIN categories c ON b.category_id = c.id
+    LEFT JOIN (
+      SELECT category_id, SUM(amount) as total_spent
+      FROM transactions
+      WHERE type = 'expense' AND created_at >= ? AND created_at <= ?
+      GROUP BY category_id
+    ) spent ON b.category_id = spent.category_id
+    ORDER BY b.monthly_limit DESC
+  `.trim();
+
+  const rows = await db.getAllAsync<{
+    id: number;
+    category_id: number;
+    monthly_limit: number;
+    created_at: string;
+    category_name: string;
+    category_icon: string;
+    category_color: string;
+    spent_amount: number;
+  }>(sql, [startDate, endDate]);
+
+  return rows.map((r) => {
+    const spent = r.spent_amount || 0;
+    const limit = r.monthly_limit || 0;
+    const remaining = Math.max(0, limit - spent);
+    const percentage = limit > 0 ? parseFloat(((spent / limit) * 100).toFixed(1)) : 0;
+    return {
+      ...r,
+      spent_amount: spent,
+      remaining_amount: remaining,
+      percentage_used: percentage,
+    };
+  });
+};
+
+export const setCategoryBudget = async (categoryId: number, monthlyLimit: number): Promise<void> => {
+  const db = await connectDb();
+  await db.runAsync(
+    `INSERT INTO budgets (category_id, monthly_limit) VALUES (?, ?)
+     ON CONFLICT(category_id) DO UPDATE SET monthly_limit = excluded.monthly_limit`,
+    [categoryId, monthlyLimit]
+  );
+};
+
+export const deleteCategoryBudget = async (categoryId: number): Promise<void> => {
+  const db = await connectDb();
+  await db.runAsync(`DELETE FROM budgets WHERE category_id = ?`, [categoryId]);
+};
+
+// --- PURE SQL CALENDAR DAILY AGGREGATION (INSTANT) ---
+
+export const getMonthlyDailyExpenses = async (
+  year: number,
+  month: number
+): Promise<{ day: number; amount: number; count: number }[]> => {
+  const db = await connectDb();
+  const mStr = String(month).padStart(2, "0");
+  const lastDay = new Date(year, month, 0).getDate();
+  const startDate = `${year}-${mStr}-01T00:00:00.000Z`;
+  const endDate = `${year}-${mStr}-${String(lastDay).padStart(2, "0")}T23:59:59.999Z`;
+
+  const sql = `
+    SELECT 
+      CAST(strftime('%d', created_at) AS INTEGER) as day,
+      COALESCE(SUM(amount), 0) as amount,
+      COUNT(*) as count
+    FROM transactions
+    WHERE type = 'expense' AND created_at >= ? AND created_at <= ?
+    GROUP BY day
+  `.trim();
+
+  return db.getAllAsync<{ day: number; amount: number; count: number }>(sql, [startDate, endDate]);
+};
+
+// --- SAVINGS GOALS CRUD ---
+
+export const getSavingsGoals = async (): Promise<SavingsGoal[]> => {
+  const db = await connectDb();
+  const rows = await db.getAllAsync<SavingsGoal>(
+    `SELECT * FROM savings_goals ORDER BY is_completed ASC, target_amount DESC`
+  );
+  return rows.map(r => ({
+    ...r,
+    quick_amount: r.quick_amount || 25.0,
+  }));
+};
+
+export const addSavingsGoal = async (data: Omit<SavingsGoal, "id">): Promise<number> => {
+  const db = await connectDb();
+  const { name, target_amount, current_amount = 0, quick_amount = 25.0, target_date, icon = "savings", color = "#10B981" } = data;
+  const result = await db.runAsync(
+    `INSERT INTO savings_goals (name, target_amount, current_amount, quick_amount, target_date, icon, color, is_completed)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [name.trim(), target_amount, current_amount, quick_amount, target_date || null, icon, color, current_amount >= target_amount ? 1 : 0]
+  );
+  return result.lastInsertRowId;
+};
+
+export const updateSavingsGoal = async (data: Partial<SavingsGoal> & { id: number }): Promise<void> => {
+  const db = await connectDb();
+  const { id, name, target_amount, current_amount, quick_amount, target_date, icon, color, is_completed } = data;
+  await db.runAsync(
+    `UPDATE savings_goals 
+     SET name = COALESCE(?, name),
+         target_amount = COALESCE(?, target_amount),
+         current_amount = COALESCE(?, current_amount),
+         quick_amount = COALESCE(?, quick_amount),
+         target_date = COALESCE(?, target_date),
+         icon = COALESCE(?, icon),
+         color = COALESCE(?, color),
+         is_completed = COALESCE(?, is_completed)
+     WHERE id = ?`,
+    [name?.trim() ?? null, target_amount ?? null, current_amount ?? null, quick_amount ?? null, target_date ?? null, icon ?? null, color ?? null, is_completed ?? null, id]
+  );
+};
+
+export const deleteSavingsGoal = async (id: number): Promise<void> => {
+  const db = await connectDb();
+  await db.runAsync(`DELETE FROM savings_goals WHERE id = ?`, [id]);
+};
+
+export const contributeToGoal = async (id: number, amount: number): Promise<void> => {
+  const db = await connectDb();
+  await db.withTransactionAsync(async () => {
+    const goals = await db.getAllAsync<SavingsGoal>(`SELECT * FROM savings_goals WHERE id = ?`, [id]);
+    if (goals[0]) {
+      const newAmount = Math.max(0, (goals[0].current_amount || 0) + amount);
+      const isCompleted = newAmount >= goals[0].target_amount ? 1 : 0;
+      await db.runAsync(
+        `UPDATE savings_goals SET current_amount = ?, is_completed = ? WHERE id = ?`,
+        [newAmount, isCompleted, id]
+      );
+    }
+  });
+};
+
+// --- QUICK SHORTCUTS CRUD ---
+
+export const getQuickShortcuts = async (): Promise<QuickShortcut[]> => {
+  const db = await connectDb();
+  return db.getAllAsync<QuickShortcut>(`
+    SELECT 
+      qs.id, qs.title, qs.icon, qs.amount, qs.category_id, qs.type,
+      c.name as category_name, c.color as category_color
+    FROM quick_shortcuts qs
+    LEFT JOIN categories c ON qs.category_id = c.id
+    ORDER BY qs.id ASC
+  `);
+};
+
+export const addQuickShortcut = async (
+  title: string,
+  icon: string,
+  amount: number,
+  category_id: number,
+  type: TransactionType = "expense"
+): Promise<number> => {
+  const db = await connectDb();
+  const result = await db.runAsync(
+    `INSERT INTO quick_shortcuts (title, icon, amount, category_id, type) VALUES (?, ?, ?, ?, ?)`,
+    [title.trim(), icon, amount, category_id, type]
+  );
+  return result.lastInsertRowId;
+};
+
+export const updateQuickShortcut = async (
+  id: number,
+  title: string,
+  icon: string,
+  amount: number,
+  category_id: number,
+  type: TransactionType = "expense"
+): Promise<void> => {
+  const db = await connectDb();
+  await db.runAsync(
+    `UPDATE quick_shortcuts SET title = ?, icon = ?, amount = ?, category_id = ?, type = ? WHERE id = ?`,
+    [title.trim(), icon, amount, category_id, type, id]
+  );
+};
+
+export const deleteQuickShortcut = async (id: number): Promise<void> => {
+  const db = await connectDb();
+  await db.runAsync(`DELETE FROM quick_shortcuts WHERE id = ?`, [id]);
+};
+
+// --- APP NOTIFICATIONS CRUD ---
+
+export const getAppNotifications = async (limit: number = 50): Promise<AppNotification[]> => {
+  const db = await connectDb();
+  return db.getAllAsync<AppNotification>(
+    `SELECT * FROM app_notifications ORDER BY created_at DESC, id DESC LIMIT ?`,
+    [limit]
+  );
+};
+
+export const getUnreadNotificationCount = async (): Promise<number> => {
+  const db = await connectDb();
+  const rows = await db.getAllAsync<{ count: number }>(
+    `SELECT COUNT(*) as count FROM app_notifications WHERE is_read = 0`
+  );
+  return rows[0]?.count || 0;
+};
+
+export const addAppNotification = async (
+  type: AppNotification["type"],
+  title: string,
+  body: string,
+  data?: string
+): Promise<number> => {
+  const db = await connectDb();
+  const result = await db.runAsync(
+    `INSERT INTO app_notifications (type, title, body, data, created_at) VALUES (?, ?, ?, ?, ?)`,
+    [type, title.trim(), body.trim(), data || null, new Date().toISOString()]
+  );
+  return result.lastInsertRowId;
+};
+
+export const markNotificationAsRead = async (id: number): Promise<void> => {
+  const db = await connectDb();
+  await db.runAsync(`UPDATE app_notifications SET is_read = 1 WHERE id = ?`, [id]);
+};
+
+export const markAllNotificationsAsRead = async (): Promise<void> => {
+  const db = await connectDb();
+  await db.runAsync(`UPDATE app_notifications SET is_read = 1`);
+};
+
+export const clearAllNotifications = async (): Promise<void> => {
+  const db = await connectDb();
+  await db.runAsync(`DELETE FROM app_notifications`);
+};
+
+// --- EVENTS & TRIPS (VACATION TRACKING) CRUD ---
+
+export const getFinanceEvents = async (): Promise<FinanceEvent[]> => {
+  const db = await connectDb();
+  const rows = await db.getAllAsync<{
+    id: number;
+    name: string;
+    description: string | null;
+    icon: string;
+    color: string;
+    budget: number;
+    start_date: string | null;
+    end_date: string | null;
+    is_active: number;
+    created_at: string;
+    total_spent: number;
+    transaction_count: number;
+  }>(`
+    SELECT 
+      e.*,
+      COALESCE(SUM(CASE WHEN t.type = 'expense' THEN t.amount ELSE 0 END), 0) as total_spent,
+      COUNT(t.id) as transaction_count
+    FROM finance_events e
+    LEFT JOIN transactions t ON t.event_id = e.id
+    GROUP BY e.id
+    ORDER BY e.is_active DESC, e.created_at DESC
+  `);
+
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    description: r.description || undefined,
+    icon: r.icon || "flight",
+    color: r.color || "#F43F5E",
+    budget: r.budget || 0,
+    start_date: r.start_date || undefined,
+    end_date: r.end_date || undefined,
+    is_active: r.is_active,
+    created_at: r.created_at,
+    total_spent: r.total_spent || 0,
+    transaction_count: r.transaction_count || 0,
+  }));
+};
+
+export const getFinanceEventById = async (id: number): Promise<FinanceEvent | null> => {
+  const db = await connectDb();
+  const eventRows = await db.getAllAsync<FinanceEvent>(`SELECT * FROM finance_events WHERE id = ?`, [id]);
+  if (eventRows.length === 0) return null;
+  const event = eventRows[0];
+
+  const breakdownRows = await db.getAllAsync<{
+    category_id: number;
+    name: string;
+    icon: string;
+    color: string;
+    type: TransactionType;
+    total: number;
+    count: number;
+  }>(`
+    SELECT 
+      COALESCE(t.category_id, 0) as category_id,
+      COALESCE(c.name, 'Uncategorized') as name,
+      COALESCE(c.icon, 'category') as icon,
+      COALESCE(c.color, '#64748B') as color,
+      t.type,
+      SUM(t.amount) as total,
+      COUNT(t.id) as count
+    FROM transactions t
+    LEFT JOIN categories c ON t.category_id = c.id
+    WHERE t.event_id = ?
+    GROUP BY t.category_id, t.type
+    ORDER BY total DESC
+  `, [id]);
+
+  const totalSpent = breakdownRows.reduce((acc, curr) => acc + (curr.type === "expense" ? curr.total : 0), 0);
+  const category_breakdown: CategoryBreakdown[] = breakdownRows.map((r) => ({
+    category_id: r.category_id,
+    name: r.name,
+    icon: r.icon,
+    color: r.color,
+    type: r.type,
+    total: r.total,
+    count: r.count,
+    percentage: totalSpent > 0 ? parseFloat(((r.total / totalSpent) * 100).toFixed(1)) : 0,
+  }));
+
+  return {
+    ...event,
+    total_spent: totalSpent,
+    transaction_count: breakdownRows.reduce((acc, curr) => acc + curr.count, 0),
+    category_breakdown,
+  };
+};
+
+export const addFinanceEvent = async (
+  name: string,
+  description?: string,
+  icon: string = "flight",
+  color: string = "#F43F5E",
+  budget: number = 0,
+  startDate?: string,
+  endDate?: string
+): Promise<number> => {
+  const db = await connectDb();
+  const result = await db.runAsync(
+    `INSERT INTO finance_events (name, description, icon, color, budget, start_date, end_date) 
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [name.trim(), description?.trim() || null, icon, color, budget, startDate || null, endDate || null]
+  );
+  return result.lastInsertRowId;
+};
+
+export const editFinanceEvent = async (
+  id: number,
+  name: string,
+  description?: string,
+  icon?: string,
+  color?: string,
+  budget?: number,
+  startDate?: string,
+  endDate?: string,
+  isActive?: number
+): Promise<void> => {
+  const db = await connectDb();
+  await db.runAsync(
+    `UPDATE finance_events 
+     SET name = ?, description = ?, icon = COALESCE(?, icon), color = COALESCE(?, color), 
+         budget = COALESCE(?, budget), start_date = ?, end_date = ?, is_active = COALESCE(?, is_active) 
+     WHERE id = ?`,
+    [
+      name.trim(),
+      description?.trim() || null,
+      icon || null,
+      color || null,
+      budget !== undefined ? budget : null,
+      startDate || null,
+      endDate || null,
+      isActive !== undefined ? isActive : null,
+      id,
+    ]
+  );
+};
+
+export const deleteFinanceEvent = async (id: number): Promise<void> => {
+  const db = await connectDb();
+  await db.withTransactionAsync(async () => {
+    // Dissociate transactions before deleting event
+    await db.runAsync(`UPDATE transactions SET event_id = NULL WHERE event_id = ?`, [id]);
+    await db.runAsync(`DELETE FROM finance_events WHERE id = ?`, [id]);
+  });
+};
+
 // --- SETTINGS MANAGEMENT ---
 
 export const getSetting = async (key: string, defaultValue: string = ""): Promise<string> => {
@@ -527,16 +1121,26 @@ export const getAppSettings = async (): Promise<AppSettings> => {
   const currencySymbol = await getSetting("currency_symbol", "€");
   const currencyPosition = (await getSetting("currency_position", "suffix")) as "prefix" | "suffix";
   const hideBalance = (await getSetting("hide_balance", "false")) === "true";
-  const themeMode = (await getSetting("theme_mode", "system")) as "light" | "dark" | "system";
+  const themeMode = (await getSetting("theme_mode", "light")) as "light" | "dark";
   const dateFormat = await getSetting("date_format", "MMM D, YYYY");
+  const notificationsEnabled = (await getSetting("notifications_enabled", "true")) === "true";
+  const notifyRecurring = (await getSetting("notify_recurring", "true")) === "true";
+  const notifyMonthEnd = (await getSetting("notify_month_end", "true")) === "true";
+  const notifyYearEnd = (await getSetting("notify_year_end", "true")) === "true";
+  const notifyBudgets = (await getSetting("notify_budgets", "true")) === "true";
 
   return {
     currency,
     currencySymbol,
     currencyPosition,
     hideBalance,
-    themeMode,
+    themeMode: themeMode === "dark" ? "dark" : "light",
     dateFormat,
+    notificationsEnabled,
+    notifyRecurring,
+    notifyMonthEnd,
+    notifyYearEnd,
+    notifyBudgets,
   };
 };
 
@@ -551,6 +1155,7 @@ export const seedDatabase = async (): Promise<void> => {
       DELETE FROM transactions;
       DELETE FROM recurring_transactions;
       DELETE FROM budgets;
+      DELETE FROM savings_goals;
       DELETE FROM categories;
       DELETE FROM sqlite_sequence;
     `);
@@ -601,61 +1206,77 @@ export const seedDatabase = async (): Promise<void> => {
       return dt.toISOString();
     };
 
+    const todayDay = now.getDate();
+
     for (let i = 35; i >= 0; i--) {
       const targetDate = new Date(currentYear, currentMonth - i, 1);
       const y = targetDate.getFullYear();
       const m = targetDate.getMonth(); // 0-indexed
       const monthLabel = targetDate.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+      const isCurrentMonth = i === 0;
+
+      // Helper to ensure we never seed future days in the current month
+      const canSeedDay = (day: number) => !isCurrentMonth || day <= todayDay;
 
       // Career progression salary ($3,600 in yr 1, $4,100 in yr 2, $4,500 in yr 3)
-      const baseSalary = 3600 + (35 - i) * 28;
-      transactionsToInsert.push({
-        type: "income",
-        amount: parseFloat(baseSalary.toFixed(2)),
-        category_id: categoryIdMap["Salary & Wages"],
-        description: `Salary • ${monthLabel}`,
-        created_at: makeIso(y, m, 1, 9, 30),
-      });
+      if (canSeedDay(1)) {
+        const baseSalary = 3600 + (35 - i) * 28;
+        transactionsToInsert.push({
+          type: "income",
+          amount: parseFloat(baseSalary.toFixed(2)),
+          category_id: categoryIdMap["Salary & Wages"],
+          description: `Salary • ${monthLabel}`,
+          created_at: makeIso(y, m, 1, 9, 30),
+        });
+      }
 
       // Monthly Rent
-      const rentAmount = 1200 + Math.floor((35 - i) / 12) * 50;
-      transactionsToInsert.push({
-        type: "expense",
-        amount: rentAmount,
-        category_id: categoryIdMap["Housing & Rent"],
-        description: `Apartment Rent • ${monthLabel}`,
-        created_at: makeIso(y, m, 2, 10, 0),
-      });
+      if (canSeedDay(2)) {
+        const rentAmount = 1200 + Math.floor((35 - i) / 12) * 50;
+        transactionsToInsert.push({
+          type: "expense",
+          amount: rentAmount,
+          category_id: categoryIdMap["Housing & Rent"],
+          description: `Apartment Rent • ${monthLabel}`,
+          created_at: makeIso(y, m, 2, 10, 0),
+        });
+      }
 
       // Utilities & Fiber Internet
-      transactionsToInsert.push({
-        type: "expense",
-        amount: parseFloat((135 + Math.sin(i) * 25).toFixed(2)),
-        category_id: categoryIdMap["Utilities & Internet"],
-        description: `Electricity & High-Speed Fiber`,
-        created_at: makeIso(y, m, 5, 14, 15),
-      });
+      if (canSeedDay(5)) {
+        transactionsToInsert.push({
+          type: "expense",
+          amount: parseFloat((135 + Math.sin(i) * 25).toFixed(2)),
+          category_id: categoryIdMap["Utilities & Internet"],
+          description: `Electricity & High-Speed Fiber`,
+          created_at: makeIso(y, m, 5, 14, 15),
+        });
+      }
 
       // Cloud & Media Subscriptions
-      transactionsToInsert.push({
-        type: "expense",
-        amount: 48.97,
-        category_id: categoryIdMap["Subscriptions & Cloud"],
-        description: `Apple One & Media Subscriptions`,
-        created_at: makeIso(y, m, 8, 8, 0),
-      });
+      if (canSeedDay(8)) {
+        transactionsToInsert.push({
+          type: "expense",
+          amount: 48.97,
+          category_id: categoryIdMap["Subscriptions & Cloud"],
+          description: `Apple One & Media Subscriptions`,
+          created_at: makeIso(y, m, 8, 8, 0),
+        });
+      }
 
       // Gym Membership
-      transactionsToInsert.push({
-        type: "expense",
-        amount: 65.00,
-        category_id: categoryIdMap["Health & Fitness"],
-        description: `Gym & Wellness Club`,
-        created_at: makeIso(y, m, 10, 11, 0),
-      });
+      if (canSeedDay(10)) {
+        transactionsToInsert.push({
+          type: "expense",
+          amount: 65.00,
+          category_id: categoryIdMap["Health & Fitness"],
+          description: `Gym & Wellness Club`,
+          created_at: makeIso(y, m, 10, 11, 0),
+        });
+      }
 
       // Bi-monthly Freelance Consulting
-      if (i % 2 === 0) {
+      if (i % 2 === 0 && canSeedDay(15)) {
         const freelanceAmount = 650 + ((i * 73) % 600);
         transactionsToInsert.push({
           type: "income",
@@ -667,7 +1288,7 @@ export const seedDatabase = async (): Promise<void> => {
       }
 
       // Quarterly Portfolio Dividends
-      if (i % 3 === 0) {
+      if (i % 3 === 0 && canSeedDay(20)) {
         const divAmount = 180 + ((i * 47) % 250);
         transactionsToInsert.push({
           type: "income",
@@ -682,41 +1303,47 @@ export const seedDatabase = async (): Promise<void> => {
       const groceryDays = [3, 10, 17, 24];
       const stores = ["Trader Joe's", "Whole Foods Market", "Local Farmers Market", "Costco Wholesale"];
       groceryDays.forEach((day, idx) => {
-        const amt = 75 + ((i * 13 + idx * 29) % 70);
-        transactionsToInsert.push({
-          type: "expense",
-          amount: parseFloat(amt.toFixed(2)),
-          category_id: categoryIdMap["Groceries & Supermarket"],
-          description: `${stores[idx]} Restock`,
-          created_at: makeIso(y, m, day, 17, 30),
-        });
+        if (canSeedDay(day)) {
+          const amt = 75 + ((i * 13 + idx * 29) % 70);
+          transactionsToInsert.push({
+            type: "expense",
+            amount: parseFloat(amt.toFixed(2)),
+            category_id: categoryIdMap["Groceries & Supermarket"],
+            description: `${stores[idx]} Restock`,
+            created_at: makeIso(y, m, day, 17, 30),
+          });
+        }
       });
 
       // 4 Weekly Dining & Coffee
       const diningDays = [6, 13, 20, 27];
       const venues = ["Artisan Espresso & Bakery", "Italian Trattoria", "Sushi Bar & Omakase", "Weekend Brunch"];
       diningDays.forEach((day, idx) => {
-        const amt = 24 + ((i * 17 + idx * 31) % 65);
-        transactionsToInsert.push({
-          type: "expense",
-          amount: parseFloat(amt.toFixed(2)),
-          category_id: categoryIdMap["Dining & Coffee"],
-          description: venues[idx],
-          created_at: makeIso(y, m, day, 20, 15),
-        });
+        if (canSeedDay(day)) {
+          const amt = 24 + ((i * 17 + idx * 31) % 65);
+          transactionsToInsert.push({
+            type: "expense",
+            amount: parseFloat(amt.toFixed(2)),
+            category_id: categoryIdMap["Dining & Coffee"],
+            description: venues[idx],
+            created_at: makeIso(y, m, day, 20, 15),
+          });
+        }
       });
 
       // Transport & Fuel
-      transactionsToInsert.push({
-        type: "expense",
-        amount: parseFloat((75 + ((i * 19) % 45)).toFixed(2)),
-        category_id: categoryIdMap["Transport & Fuel"],
-        description: `Gas Station & Transit Pass`,
-        created_at: makeIso(y, m, 16, 13, 0),
-      });
+      if (canSeedDay(16)) {
+        transactionsToInsert.push({
+          type: "expense",
+          amount: parseFloat((75 + ((i * 19) % 45)).toFixed(2)),
+          category_id: categoryIdMap["Transport & Fuel"],
+          description: `Gas Station & Transit Pass`,
+          created_at: makeIso(y, m, 16, 13, 0),
+        });
+      }
 
       // Shopping & Tech (Occasional)
-      if (i % 2 === 1) {
+      if (i % 2 === 1 && canSeedDay(22)) {
         const techAmt = 89 + ((i * 41) % 220);
         transactionsToInsert.push({
           type: "expense",
@@ -728,7 +1355,7 @@ export const seedDatabase = async (): Promise<void> => {
       }
 
       // Personal & Wellness
-      if (i % 3 === 1) {
+      if (i % 3 === 1 && canSeedDay(18)) {
         transactionsToInsert.push({
           type: "expense",
           amount: 45.00,
@@ -739,7 +1366,7 @@ export const seedDatabase = async (): Promise<void> => {
       }
 
       // Vacations in Summer (July/Aug) and Winter (Dec)
-      if (m === 6 || m === 7 || m === 11) {
+      if ((m === 6 || m === 7 || m === 11) && canSeedDay(26)) {
         const travelAmt = 450 + ((i * 89) % 650);
         transactionsToInsert.push({
           type: "expense",
@@ -751,7 +1378,7 @@ export const seedDatabase = async (): Promise<void> => {
       }
 
       // Year-end Bonus in December
-      if (m === 11) {
+      if (m === 11 && canSeedDay(22)) {
         transactionsToInsert.push({
           type: "income",
           amount: 1500.00,
@@ -762,7 +1389,7 @@ export const seedDatabase = async (): Promise<void> => {
       }
     }
 
-    // Batch insert transactions
+    // High-speed transaction batch insertion (already in outer transaction)
     for (const tx of transactionsToInsert) {
       await db.runAsync(
         `INSERT INTO transactions (type, amount, category_id, description, created_at) VALUES (?, ?, ?, ?, ?)`,
@@ -794,14 +1421,49 @@ export const seedDatabase = async (): Promise<void> => {
        VALUES (?, ?, ?, ?, 'monthly', 10, ?, 1)`,
       ['expense', 65.00, categoryIdMap['Health & Fitness'], 'Gym Membership', `${currentYear}-01-01T00:00:00.000Z`]
     );
+
+    // Insert sample budgets
+    if (categoryIdMap['Groceries & Supermarket']) {
+      await db.runAsync(`INSERT INTO budgets (category_id, monthly_limit) VALUES (?, 450.00)`, [categoryIdMap['Groceries & Supermarket']]);
+    }
+    if (categoryIdMap['Dining & Coffee']) {
+      await db.runAsync(`INSERT INTO budgets (category_id, monthly_limit) VALUES (?, 200.00)`, [categoryIdMap['Dining & Coffee']]);
+    }
+    if (categoryIdMap['Transport & Fuel']) {
+      await db.runAsync(`INSERT INTO budgets (category_id, monthly_limit) VALUES (?, 150.00)`, [categoryIdMap['Transport & Fuel']]);
+    }
+    if (categoryIdMap['Subscriptions & Cloud']) {
+      await db.runAsync(`INSERT INTO budgets (category_id, monthly_limit) VALUES (?, 60.00)`, [categoryIdMap['Subscriptions & Cloud']]);
+    }
+
+    // Insert sample savings goals
+    await db.runAsync(
+      `INSERT INTO savings_goals (name, target_amount, current_amount, target_date, icon, color, is_completed)
+       VALUES (?, ?, ?, ?, ?, ?, 0)`,
+      ['Emergency Fund', 5000.00, 3200.00, `${currentYear}-12-31T23:59:59.000Z`, 'savings', '#10B981']
+    );
+    await db.runAsync(
+      `INSERT INTO savings_goals (name, target_amount, current_amount, target_date, icon, color, is_completed)
+       VALUES (?, ?, ?, ?, ?, ?, 0)`,
+      ['Summer Vacation', 1500.00, 850.00, `${currentYear}-07-31T23:59:59.000Z`, 'flight', '#F43F5E']
+    );
+    await db.runAsync(
+      `INSERT INTO savings_goals (name, target_amount, current_amount, target_date, icon, color, is_completed)
+       VALUES (?, ?, ?, ?, ?, ?, 0)`,
+      ['Tech & Gear Setup', 2000.00, 1450.00, `${currentYear}-10-31T23:59:59.000Z`, 'computer', '#06B6D4']
+    );
   });
 
-  console.log("Database seeded successfully with 36 months of multi-year fintech data.");
+  console.log("Database seeded successfully with 36 months of multi-year fintech data, budgets, and savings goals.");
 };
 
 export const resetDatabase = async (): Promise<void> => {
   const db = await connectDb();
   await db.execAsync(`
+    DROP TABLE IF EXISTS app_notifications;
+    DROP TABLE IF EXISTS savings_goals;
+    DROP TABLE IF EXISTS quick_shortcuts;
+    DROP TABLE IF EXISTS finance_events;
     DROP TABLE IF EXISTS transactions;
     DROP TABLE IF EXISTS recurring_transactions;
     DROP TABLE IF EXISTS budgets;

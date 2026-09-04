@@ -9,7 +9,7 @@ interface CategoryIconProps {
   containerSize?: number;
 }
 
-export const CategoryIcon: React.FC<CategoryIconProps> = ({
+export const CategoryIcon: React.FC<CategoryIconProps> = React.memo(({
   icon = 'category',
   color = '#3B82F6',
   size = 20,
@@ -50,4 +50,6 @@ export const CategoryIcon: React.FC<CategoryIconProps> = ({
       />
     </View>
   );
-};
+});
+
+CategoryIcon.displayName = 'CategoryIcon';

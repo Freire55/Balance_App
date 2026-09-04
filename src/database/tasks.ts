@@ -1,30 +1,53 @@
 import * as BackgroundFetch from 'expo-background-fetch';
 import * as TaskManager from 'expo-task-manager';
-import { getPeriodSummary } from './database';
+import {
+  checkAndSendEndOfMonthSummary,
+  checkAndSendEndOfYearSummary,
+  checkBudgetThresholds,
+} from '../services/notifications';
+import { processRecurringTransactions } from './recurringEngine';
 
-export const MONTHLY_STATS_TASK = 'MONTHLY_STATS_TASK';
+export const FINANCE_BACKGROUND_SYNC_TASK = 'FINANCE_BACKGROUND_SYNC_TASK';
+export const MONTHLY_STATS_TASK = FINANCE_BACKGROUND_SYNC_TASK; // Alias
 
-TaskManager.defineTask(MONTHLY_STATS_TASK, async () => {
+TaskManager.defineTask(FINANCE_BACKGROUND_SYNC_TASK, async () => {
   try {
-    const now = new Date();
-    const month = (now.getMonth() + 1).toString().padStart(2, '0');
-    const year = now.getFullYear().toString();
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    console.log('[BackgroundTasks] Running background finance sync...');
+    
+    // 1. Process recurring payments & bill notifications
+    await processRecurringTransactions();
 
-    const startDate = `${year}-${month}-01T00:00:00.000Z`;
-    const endDate = `${year}-${month}-${String(lastDay).padStart(2, '0')}T23:59:59.999Z`;
+    // 2. Check End-of-Month summary
+    await checkAndSendEndOfMonthSummary();
 
-    const summary = await getPeriodSummary(startDate, endDate);
+    // 3. Check End-of-Year review
+    await checkAndSendEndOfYearSummary();
 
-    const isEndOfMonth = now.getDate() >= 28;
-
-    if (isEndOfMonth) {
-      console.log(`[Monthly Task] Net Cash Flow: ${summary.netBalance.toFixed(2)} (Savings Rate: ${summary.savingsRate}%)`);
-    }
+    // 4. Check category budget thresholds
+    await checkBudgetThresholds();
 
     return BackgroundFetch.BackgroundFetchResult.NewData;
   } catch (error) {
-    console.error('Background task error:', error);
+    console.error('[BackgroundTasks] Error during background task execution:', error);
     return BackgroundFetch.BackgroundFetchResult.Failed;
   }
 });
+
+/**
+ * Register background synchronization task on app boot.
+ */
+export async function registerBackgroundTasks(): Promise<void> {
+  try {
+    const isRegistered = await TaskManager.isTaskRegisteredAsync(FINANCE_BACKGROUND_SYNC_TASK);
+    if (!isRegistered) {
+      await BackgroundFetch.registerTaskAsync(FINANCE_BACKGROUND_SYNC_TASK, {
+        minimumInterval: 60 * 60 * 6, // 6 hours interval
+        stopOnTerminate: false,
+        startOnBoot: true,
+      });
+      console.log('[BackgroundTasks] Registered FINANCE_BACKGROUND_SYNC_TASK successfully.');
+    }
+  } catch (error) {
+    console.warn('[BackgroundTasks] Background fetch registration note:', error);
+  }
+}

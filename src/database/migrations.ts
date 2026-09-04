@@ -179,8 +179,186 @@ export const migrations: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_tx_cat_date ON transactions(category_id, created_at DESC);
       `);
     }
+  },
+  {
+    version: 3,
+    name: 'notifications_goals_shortcuts_and_tags',
+    up: async (db: SQLite.SQLiteDatabase) => {
+      // 1. Add tags column to transactions if not present
+      const txCols = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(transactions)`);
+      const txColNames = txCols.map(c => c.name);
+      if (!txColNames.includes('tags')) {
+        await db.execAsync(`ALTER TABLE transactions ADD COLUMN tags TEXT`);
+      }
+
+      // 2. Notifications table for in-app notification center
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS app_notifications (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          body TEXT NOT NULL,
+          data TEXT,
+          is_read INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_notif_created ON app_notifications(created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_notif_read ON app_notifications(is_read);
+      `);
+
+      // 3. Savings goals table
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS savings_goals (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          target_amount REAL NOT NULL,
+          current_amount REAL DEFAULT 0,
+          target_date TEXT,
+          icon TEXT DEFAULT 'savings',
+          color TEXT DEFAULT '#10B981',
+          is_completed INTEGER DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+      `);
+
+      // 4. Quick-Add shortcuts table
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS quick_shortcuts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          title TEXT NOT NULL,
+          icon TEXT NOT NULL,
+          amount REAL NOT NULL,
+          category_id INTEGER,
+          type TEXT DEFAULT 'expense',
+          FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
+        );
+      `);
+
+      // 5. Populate default notification settings
+      await db.execAsync(`
+        INSERT OR IGNORE INTO app_settings (key, value) VALUES ('notifications_enabled', 'true');
+        INSERT OR IGNORE INTO app_settings (key, value) VALUES ('notify_recurring', 'true');
+        INSERT OR IGNORE INTO app_settings (key, value) VALUES ('notify_month_end', 'true');
+        INSERT OR IGNORE INTO app_settings (key, value) VALUES ('notify_year_end', 'true');
+        INSERT OR IGNORE INTO app_settings (key, value) VALUES ('notify_budgets', 'true');
+      `);
+
+      // 6. Populate default quick shortcuts if categories exist
+      const coffeeCat = await db.getAllAsync<{ id: number }>(`SELECT id FROM categories WHERE name LIKE '%Dining%' OR name LIKE '%Coffee%' LIMIT 1`);
+      const groceryCat = await db.getAllAsync<{ id: number }>(`SELECT id FROM categories WHERE name LIKE '%Groceries%' LIMIT 1`);
+      const transportCat = await db.getAllAsync<{ id: number }>(`SELECT id FROM categories WHERE name LIKE '%Transport%' LIMIT 1`);
+
+      const shortcutsCount = await db.getAllAsync<{ count: number }>(`SELECT COUNT(*) as count FROM quick_shortcuts`);
+      if (!shortcutsCount[0] || shortcutsCount[0].count === 0) {
+        if (coffeeCat[0]) {
+          await db.runAsync(`INSERT INTO quick_shortcuts (title, icon, amount, category_id, type) VALUES (?, ?, ?, ?, ?)`,
+            ['Espresso / Coffee', 'local-cafe', 3.50, coffeeCat[0].id, 'expense']);
+          await db.runAsync(`INSERT INTO quick_shortcuts (title, icon, amount, category_id, type) VALUES (?, ?, ?, ?, ?)`,
+            ['Lunch / Dining', 'restaurant', 14.00, coffeeCat[0].id, 'expense']);
+        }
+        if (groceryCat[0]) {
+          await db.runAsync(`INSERT INTO quick_shortcuts (title, icon, amount, category_id, type) VALUES (?, ?, ?, ?, ?)`,
+            ['Quick Groceries', 'local-grocery-store', 25.00, groceryCat[0].id, 'expense']);
+        }
+        if (transportCat[0]) {
+          await db.runAsync(`INSERT INTO quick_shortcuts (title, icon, amount, category_id, type) VALUES (?, ?, ?, ?, ?)`,
+            ['Fuel / Transit', 'directions-car', 40.00, transportCat[0].id, 'expense']);
+        }
+      }
+    }
+  },
+  {
+    version: 4,
+    name: 'performance_and_goals_quick_amount',
+    up: async (db: SQLite.SQLiteDatabase) => {
+      // 1. Add quick_amount to savings_goals
+      const goalCols = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(savings_goals)`);
+      const goalColNames = goalCols.map(c => c.name);
+      if (!goalColNames.includes('quick_amount')) {
+        await db.execAsync(`ALTER TABLE savings_goals ADD COLUMN quick_amount REAL DEFAULT 25.0`);
+      }
+
+      // 2. High-performance covering indexes
+      await db.execAsync(`
+        CREATE INDEX IF NOT EXISTS idx_tx_cat_type_date ON transactions(category_id, type, created_at);
+        CREATE INDEX IF NOT EXISTS idx_budgets_cat ON budgets(category_id);
+        CREATE INDEX IF NOT EXISTS idx_goals_completed ON savings_goals(is_completed);
+      `);
+    }
+  },
+  {
+    version: 5,
+    name: 'events_and_trips_tracking',
+    up: async (db: SQLite.SQLiteDatabase) => {
+      // 1. Finance Events / Trips table
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS finance_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          description TEXT,
+          icon TEXT DEFAULT 'flight',
+          color TEXT DEFAULT '#F43F5E',
+          budget REAL DEFAULT 0,
+          start_date TEXT,
+          end_date TEXT,
+          is_active INTEGER DEFAULT 1,
+          created_at TEXT DEFAULT (datetime('now'))
+        );
+      `);
+
+      // 2. Add event_id and tags to transactions if not present
+      const txCols = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(transactions)`);
+      const txColNames = txCols.map(c => c.name);
+      if (!txColNames.includes('tags')) {
+        await db.execAsync(`ALTER TABLE transactions ADD COLUMN tags TEXT`);
+      }
+      if (!txColNames.includes('event_id')) {
+        await db.execAsync(`ALTER TABLE transactions ADD COLUMN event_id INTEGER`);
+      }
+
+      // 3. Index for event transactions
+      await db.execAsync(`
+        CREATE INDEX IF NOT EXISTS idx_tx_event_id ON transactions(event_id);
+      `);
+
+      // 4. Seed default sample vacation event if empty
+      const existingEvents = await db.getAllAsync<{ id: number }>(`SELECT id FROM finance_events LIMIT 1`);
+      if (existingEvents.length === 0) {
+        await db.runAsync(
+          `INSERT INTO finance_events (name, description, icon, color, budget) VALUES (?, ?, ?, ?, ?)`,
+          ['Summer Vacation', 'Holiday trip: flights, hotels, food & adventures', 'flight', '#F43F5E', 1500.0]
+        );
+      }
+    }
   }
 ];
+
+export async function ensureSafeSchema(db: SQLite.SQLiteDatabase): Promise<void> {
+  try {
+    const txCols = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(transactions)`);
+    const txColNames = txCols.map(c => c.name);
+    if (!txColNames.includes('tags')) {
+      await db.execAsync(`ALTER TABLE transactions ADD COLUMN tags TEXT`);
+    }
+    if (!txColNames.includes('event_id')) {
+      await db.execAsync(`ALTER TABLE transactions ADD COLUMN event_id INTEGER`);
+    }
+
+    // High-performance covering indexes for sub-millisecond query execution
+    await db.execAsync(`
+      CREATE INDEX IF NOT EXISTS idx_tx_created_id_desc ON transactions(created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_tx_cover_budget ON transactions(type, created_at, category_id, amount);
+      CREATE INDEX IF NOT EXISTS idx_tx_cover_event ON transactions(event_id, type, amount);
+      CREATE INDEX IF NOT EXISTS idx_tx_cover_summary ON transactions(created_at, type, amount);
+      CREATE INDEX IF NOT EXISTS idx_tx_rec_date ON transactions(recurring_rule_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_rec_cat ON recurring_transactions(category_id);
+      CREATE INDEX IF NOT EXISTS idx_qs_cat ON quick_shortcuts(category_id);
+      CREATE INDEX IF NOT EXISTS idx_events_active ON finance_events(is_active, created_at DESC);
+    `);
+  } catch (e) {
+    console.warn('[Schema] Note ensuring columns and indexes:', e);
+  }
+}
 
 export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
   // Ensure migrations tracking table exists
@@ -211,4 +389,6 @@ export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
       console.log(`Migration ${migration.version} applied successfully.`);
     }
   }
+
+  await ensureSafeSchema(db);
 }
